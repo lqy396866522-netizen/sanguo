@@ -1188,6 +1188,7 @@ export class BattleView {
     const mask = createModalOverlay(this.modalLayer);
     const box = createUINode('MInfo', 640, 620, mask, 0, 0);
     drawRoundedBox(box, 640, 620, '#221833', 255, 18, '#FFD54F', 2);
+    ArtAssetManager.skinPanel(box, 640, 620);
     createLabel(box, `第 ${this.world.stage.stageId} 关 · 敌军情报`, 28, '#FFD54F', 0, 268, 500, 38);
 
     const uniq = Array.from(new Set(this.world.stage.waves.map((w) => w.monsterId)));
@@ -1217,6 +1218,7 @@ export class BattleView {
     const mask = createModalOverlay(this.modalLayer);
     const box = createUINode('DmgBox', 600, 600, mask, 0, 0);
     drawRoundedBox(box, 600, 600, '#221833', 255, 18, '#69F0AE', 2);
+    ArtAssetManager.skinPanel(box, 600, 600);
     createLabel(box, '实时伤害统计 (DPS)', 28, '#69F0AE', 0, 255, 480, 38);
 
     const entries = Object.entries(this.world.damageStats).sort((a, b) => b[1] - a[1]);
@@ -1242,6 +1244,7 @@ export class BattleView {
     const mask = createModalOverlay(this.modalLayer);
     const box = createUINode('PauseBox', 480, 420, mask, 0, 0);
     drawRoundedBox(box, 480, 420, '#221833', 255, 18, '#9575CD', 2);
+    ArtAssetManager.skinPanel(box, 480, 420);
     createLabel(box, '战斗已暂停', 30, '#FFFFFF', 0, 150, 360, 42);
     createButton(box, '继续战斗', 240, 56, '#2E7D32', () => {
       mask.destroy();
@@ -1266,6 +1269,7 @@ export class BattleView {
     this.reviveModal = mask;
     const box = createUINode('ReviveBox', 540, 360, mask, 0, 0);
     drawRoundedBox(box, 540, 360, '#221833', 255, 18, '#FF5252', 2);
+    ArtAssetManager.skinPanel(box, 540, 360);
     createLabel(box, '城防失守！', 32, '#FF8A80', 0, 115, 420, 44);
     createLabel(box, '观看激励视频可满血复活城防并击退全部敌军！', 20, '#FFE082', 0, 35, 480, 48);
     createButton(box, '复活再战 (广告)', 240, 58, '#2E7D32', async () => {
@@ -1297,6 +1301,7 @@ export class BattleView {
     this.settleModal = mask;
     const box = createUINode('SettleBox', 600, 520, mask, 0, 0);
     drawRoundedBox(box, 600, 520, '#221833', 255, 18, win ? '#FFD54F' : '#90A4AE', 3);
+    ArtAssetManager.skinPanel(box, 600, 520);
 
     const modeTag = this.world.challenge ? '【精英挑战】' : '';
     createLabel(box, win ? `${modeTag}大获全胜！(${stars}星)` : `${modeTag}惜败撤退`, 32, win ? '#FFD54F' : '#FF8A80', 0, 195, 540, 46);

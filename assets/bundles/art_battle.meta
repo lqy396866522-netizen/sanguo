@@ -1,0 +1,14 @@
+{
+  "ver": "1.2.0",
+  "importer": "directory",
+  "imported": true,
+  "uuid": "4eaa51e3-8068-4509-86a6-45089a099e1f",
+  "files": [],
+  "subMetas": {},
+  "userData": {
+    "isBundle": true,
+    "bundleConfigID": "subpackage",
+    "bundleName": "art_battle",
+    "priority": 6
+  }
+}

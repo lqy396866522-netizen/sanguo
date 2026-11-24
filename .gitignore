@@ -8,3 +8,4 @@ profiles/
 server/node_modules/
 server/dist/
 server/.env
+art_src/out/

@@ -1,3 +1,39 @@
 {
-  "__version__": "1.3.9"
+  "__version__": "1.3.9",
+  "bundleConfig": {
+    "custom": {
+      "subpackage": {
+        "displayName": "微信子包",
+        "configs": {
+          "native": {
+            "preferredOptions": {
+              "compressionType": "merge_dep",
+              "isRemote": false
+            }
+          },
+          "web": {
+            "preferredOptions": {
+              "compressionType": "merge_dep",
+              "isRemote": false
+            },
+            "fallbackOptions": {
+              "compressionType": "merge_dep"
+            }
+          },
+          "miniGame": {
+            "fallbackOptions": {
+              "compressionType": "merge_dep"
+            },
+            "configMode": "overwrite",
+            "overwriteSettings": {
+              "wechatgame": {
+                "compressionType": "subpackage",
+                "isRemote": false
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

@@ -243,6 +243,7 @@ export class LordView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('EquipModal', 560, 420, mask, 0, 0);
     drawRoundedBox(box, 560, 420, '#221833', 255, 18, '#FFD54F', 2);
+    ArtAssetManager.skinPanel(box, 560, 420);
 
     createLabel(box, `${EQUIP_SLOT_NAMES[slotType]} · ${slot.equipTier}阶`, 28, '#FFD54F', 0, 155, 480, 40);
     createLabel(box, `当前槽位强化：Lv.${slot.slotLevel} (换装无损继承)`, 21, '#80CBC4', 0, 95, 480, 34);
@@ -278,6 +279,7 @@ export class LordView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('GemModal', 540, 380, mask, 0, 0);
     drawRoundedBox(box, 540, 380, '#221833', 255, 18, QUALITY_COLORS[gem.quality], 2);
+    ArtAssetManager.skinPanel(box, 540, 380);
 
     createLabel(box, `${EQUIP_SLOT_NAMES[gem.slotType]} · ${QUALITY_NAMES[gem.quality]}宝石`, 26, QUALITY_COLORS[gem.quality], 0, 130, 480, 36);
     createLabel(box, `效果：${meta.name} +${gem.affixValue}${meta.unit}`, 22, '#FFFFFF', 0, 65, 480, 36);
@@ -308,6 +310,7 @@ export class LordView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('TalentModal', 700, 1000, mask, 0, 20);
     drawRoundedBox(box, 700, 1000, '#1F1730', 255, 18, '#FFB300', 2);
+    ArtAssetManager.skinPanel(box, 700, 1000);
     const total = this.dataMgr.talentPointsTotal();
     const used = this.dataMgr.talentPointsUsed();
     createLabel(box, '主公天赋', 32, '#FFD54F', 0, 455, 400, 44);
@@ -356,6 +359,7 @@ export class LordView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('WeaponModal', 680, 900, mask, 0, 20);
     drawRoundedBox(box, 680, 900, '#1F1730', 255, 18, '#4DD0E1', 2);
+    ArtAssetManager.skinPanel(box, 680, 900);
     const p = this.dataMgr.profile;
     createLabel(box, '神兵库', 32, '#4DD0E1', 0, 405, 400, 44);
     createLabel(box, `元宝 ${p.diamond}  ·  神兵改变主公弩箭外观并附带专属被动`, 18, '#E0E0E0', 0, 362, 620, 30);

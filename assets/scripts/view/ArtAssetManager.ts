@@ -10,7 +10,15 @@ const CORE_KEYS = [
   'boss_zhangbao',
   'bg_stage1',
   'bg_hall',
+  'ui_panel',
+  'ui_button',
 ];
+
+// 九宫格切片边距（源图像素）：角花不被拉伸
+const SLICE_INSETS: Record<string, [number, number, number, number]> = {
+  ui_panel: [64, 64, 64, 64],
+  ui_button: [40, 30, 40, 30],
+};
 
 // 分包（bundles/art_battle，微信子包）：其余武将、兵种、Boss、关卡背景与特效贴图
 const BATTLE_BUNDLE = 'art_battle';
@@ -60,10 +68,8 @@ export const VFX_ART_KEY_MAP: Record<string, string> = {
   halberd_smash: 'vfx_smash',
   wooden_ox_boom: 'vfx_explosion',
   hit_spark: 'vfx_spark',
-  lightning_chain: 'vfx_lightning',
   charm_ring: 'vfx_charm',
   heal_wall: 'vfx_heal',
-  slash_arc: 'vfx_slash',
   wind_push: 'vfx_wind',
 };
 
@@ -89,7 +95,17 @@ class ArtAssetManagerImpl {
   private loadFrom(bundle: AssetManager.Bundle, path: string, key: string): Promise<void> {
     return new Promise<void>((resolve) => {
       bundle.load(path, ImageAsset, (err, img) => {
-        if (!err && img) this.cache.set(key, SpriteFrame.createWithImage(img));
+        if (!err && img) {
+          const sf = SpriteFrame.createWithImage(img);
+          const inset = SLICE_INSETS[key];
+          if (inset) {
+            sf.insetLeft = inset[0];
+            sf.insetTop = inset[1];
+            sf.insetRight = inset[2];
+            sf.insetBottom = inset[3];
+          }
+          this.cache.set(key, sf);
+        }
         resolve();
       });
     });
@@ -138,6 +154,12 @@ class ArtAssetManagerImpl {
     sp.sizeMode = Sprite.SizeMode.CUSTOM;
     sp.spriteFrame = sf;
     return node;
+  }
+
+  // 给已用 Graphics 画好底框的弹窗叠一层九宫格面板皮肤；须在添加文字/按钮之前调用
+  public skinPanel(node: Node, w: number, h: number): void {
+    const sp = this.createSpriteNode(node, 'ui_panel', w + 16, h + 16, 0, 0);
+    if (sp) sp.getComponent(Sprite)!.type = Sprite.Type.SLICED;
   }
 }
 

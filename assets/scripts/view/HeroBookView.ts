@@ -85,6 +85,7 @@ export class HeroBookView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('HeroDetail', 640, 680, mask, 0, 0);
     drawRoundedBox(box, 640, 680, '#221833', 255, 18, hero.colorHex, 2);
+    ArtAssetManager.skinPanel(box, 640, 680);
 
     createLabel(box, `${hero.name} · ${hero.title}`, 30, hero.colorHex, 0, 290, 560, 42);
     createLabel(

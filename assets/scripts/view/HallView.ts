@@ -1,4 +1,4 @@
-import { Node, Graphics } from 'cc';
+import { Node, Graphics, Sprite } from 'cc';
 import { STAGE_CONFIGS, HERO_CONFIGS } from '../core/configs.ts';
 import { CHALLENGE_RULES, PATROL_RULES, patrolHourlyYield } from '../core/phase2Configs.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
@@ -192,7 +192,7 @@ export class HallView {
 
     const unlockedStage = stage.stageId <= p.maxClearedStage + 1;
     const cost = this.challengeMode ? CHALLENGE_RULES.staminaCost : stage.costStamina;
-    createButton(
+    const startBtn = createButton(
       this.root,
       unlockedStage ? `${this.challengeMode ? '挑战' : '开始战斗'} (粮草×${cost})` : '需先通关前置关卡',
       380,
@@ -215,6 +215,13 @@ export class HallView {
       '#FFF59D',
       '#1A1426'
     );
+    if (unlockedStage && !this.challengeMode) {
+      const skin = ArtAssetManager.createSpriteNode(startBtn.node, 'ui_button', 392, 108);
+      if (skin) {
+        skin.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+        skin.setSiblingIndex(0);
+      }
+    }
 
     // 跨服/攻略滚动提示条
     const ticker = createUINode('Ticker', 680, 44, this.root, 0, -345);
@@ -228,6 +235,7 @@ export class HallView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('PatrolBox', 620, 560, mask, 0, 0);
     drawRoundedBox(box, 620, 560, '#1E2A1E', 255, 18, '#81C784', 2);
+    ArtAssetManager.skinPanel(box, 620, 560);
     createLabel(box, '边境巡逻', 32, '#C5E1A5', 0, 230, 400, 44);
 
     const p = this.dataMgr.getPatrolPending();
@@ -287,6 +295,7 @@ export class HallView {
     const mask = createModalOverlay(this.root);
     const box = createUINode('InfoBox', 620, 460, mask, 0, 0);
     drawRoundedBox(box, 620, 460, '#231934', 255, 18, '#FFD54F', 2);
+    ArtAssetManager.skinPanel(box, 620, 460);
     createLabel(box, `第 ${stage.stageId} 关 · ${stage.name} 敌情`, 28, '#FFD54F', 0, 185, 520, 40);
     createLabel(box, stage.desc, 22, '#FFFFFF', 0, 120, 540, 40);
     createLabel(box, `【布阵建议】\n${stage.bossHint}`, 21, '#80CBC4', 0, 35, 540, 80);
