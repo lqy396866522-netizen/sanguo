@@ -1,0 +1,216 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { HERO_CONFIGS } from '../assets/scripts/core/configs.ts';
+import { BattleWorld, FIXED_DT } from '../assets/scripts/core/BattleWorld.ts';
+import { replayBattle } from '../assets/scripts/core/BattleReplay.ts';
+import { AD_DAILY_LIMITS, PATROL_RULES, WEAPON_CONFIGS, baseTechCost } from '../assets/scripts/core/phase2Configs.ts';
+import { PlayerDataManager, SCHEMA_VERSION } from '../assets/scripts/data/PlayerDataManager.ts';
+import { WechatAdService } from '../assets/scripts/sdk/WechatAdService.ts';
+
+class MemRepo {
+  constructor(initial = null) {
+    this.raw = initial ? JSON.stringify(initial) : null;
+  }
+  loadProfile() {
+    return this.raw ? JSON.parse(this.raw) : null;
+  }
+  saveProfile(p) {
+    this.raw = JSON.stringify(p);
+  }
+  clearProfile() {
+    this.raw = null;
+  }
+}
+
+const HOUR = 3600000;
+
+function makeClock(start = Date.UTC(2026, 10, 24, 2, 0, 0)) {
+  const c = { t: start };
+  c.now = () => c.t;
+  return c;
+}
+
+function runAuto(w, maxTicks = 30 * 900) {
+  w.setAutoMode(true);
+  let guard = 0;
+  while (w.phase !== 'VICTORY' && w.phase !== 'DEFEAT' && guard < maxTicks) {
+    if (w.phase === 'REVIVE_ASK') w.confirmDefeat();
+    else if (w.phase === 'ROGUE_CHOICE') w.selectRogueCard(0);
+    else if (w.phase === 'DEPLOY_PICK') w.autoPlacePendingHero();
+    else w.fixedTick(FIXED_DT);
+    guard++;
+  }
+  return w;
+}
+
+test('13. 存档 v2 -> v3 迁移：补齐二期字段且不丢旧数据', () => {
+  const clock = makeClock();
+  const base = new PlayerDataManager(new MemRepo(), clock.now).profile;
+  const v2 = JSON.parse(JSON.stringify(base));
+  v2.schemaVersion = 2;
+  v2.gold = 12345;
+  for (const k of ['challengeProgress', 'patrol', 'baseTech', 'talents', 'weaponId', 'ownedWeapons', 'adDaily']) delete v2[k];
+
+  const repo = new MemRepo(v2);
+  const mgr = new PlayerDataManager(repo, clock.now);
+  assert.equal(mgr.profile.schemaVersion, SCHEMA_VERSION);
+  assert.equal(mgr.profile.gold, 12345);
+  assert.equal(mgr.profile.weaponId, 'crossbow');
+  assert.deepEqual(mgr.profile.ownedWeapons, ['crossbow']);
+  assert.ok(mgr.profile.patrol.lastClaimAt > 0);
+  assert.equal(repo.loadProfile().schemaVersion, SCHEMA_VERSION, '迁移后应立即落盘');
+});
+
+test('14. 精英挑战：3星解锁、精英词缀出现、挑战回放一致、结算独立记星', () => {
+  const clock = makeClock();
+  const mgr = new PlayerDataManager(new MemRepo(), clock.now);
+  assert.equal(mgr.isChallengeUnlocked(1), false);
+  mgr.profile.stageProgress[1] = { stageId: 1, bestStars: 3, claimedMask: 0 };
+  assert.equal(mgr.isChallengeUnlocked(1), true);
+
+  for (const h of HERO_CONFIGS) {
+    mgr.profile.heroes[h.id].unlocked = true;
+    mgr.profile.heroes[h.id].level = 20;
+  }
+  const bonus = mgr.getLordBattleBonus();
+  const seed = 4242;
+  const w = new BattleWorld(1, mgr.profile.heroes, bonus, { seed, challenge: true });
+  let elites = 0;
+  const seen = new Set();
+  w.setAutoMode(true);
+  let guard = 0;
+  while (w.phase !== 'VICTORY' && w.phase !== 'DEFEAT' && guard < 30 * 900) {
+    if (w.phase === 'REVIVE_ASK') w.confirmDefeat();
+    else if (w.phase === 'ROGUE_CHOICE') w.selectRogueCard(0);
+    else if (w.phase === 'DEPLOY_PICK') w.autoPlacePendingHero();
+    else w.fixedTick(FIXED_DT);
+    for (const m of w.monsters) {
+      if (m.elite && !seen.has(m.uid)) {
+        seen.add(m.uid);
+        elites++;
+      }
+    }
+    guard++;
+  }
+  assert.ok(elites > 0, '挑战模式应生成精英怪');
+
+  const rep = replayBattle({ stageId: 1, heroSaves: mgr.profile.heroes, lordBonus: bonus, seed, ops: w.opLog, challenge: true });
+  assert.equal(rep.ok, true, rep.reason);
+  assert.equal(rep.kills, w.kills);
+  assert.equal(rep.wallHp, w.wallHp);
+
+  const normal = runAuto(new BattleWorld(1, mgr.profile.heroes, bonus, { seed }));
+  const rN = normal.calcSettleReward(false);
+  const rC = w.calcSettleReward(false);
+  if (w.phase === 'VICTORY' && normal.phase === 'VICTORY') assert.ok(rC.gold > rN.gold, '挑战奖励应更高');
+
+  const stars = w.getStars();
+  const diamondBefore = mgr.profile.diamond;
+  const clearedBefore = mgr.profile.maxClearedStage;
+  mgr.applyBattleSettle(1, stars, rC, { stageId: 1, challenge: true, seed, ops: w.opLog, stars, kills: w.kills, wallHp: w.wallHp, ticks: w.tickCount });
+  if (stars > 0) {
+    assert.equal(mgr.challengeStars(1), stars);
+    assert.ok(mgr.profile.diamond >= diamondBefore + 80, '挑战首通应额外发放元宝');
+  }
+  assert.equal(mgr.profile.maxClearedStage, clearedBefore, '挑战不应推进普通关卡进度');
+});
+
+test('15. 巡逻挂机：按时长累积、12小时封顶、快速巡逻每日次数与元宝消耗', () => {
+  const clock = makeClock();
+  const mgr = new PlayerDataManager(new MemRepo(), clock.now);
+  mgr.profile.maxClearedStage = 3;
+
+  assert.equal(mgr.claimPatrol().ok, false, '刚开始巡逻没有收益');
+  clock.t += 3 * HOUR;
+  const p3 = mgr.getPatrolPending();
+  assert.ok(Math.abs(p3.hours - 3) < 1e-6);
+  clock.t += 20 * HOUR;
+  const pMax = mgr.getPatrolPending();
+  assert.equal(pMax.hours, PATROL_RULES.maxHours);
+
+  const gold0 = mgr.profile.gold;
+  const r = mgr.claimPatrol(true);
+  assert.equal(r.ok, true);
+  assert.equal(mgr.profile.gold - gold0, pMax.gold * 2, '双倍领取');
+  assert.equal(mgr.getPatrolPending().hours, 0);
+
+  mgr.profile.diamond = 1000;
+  assert.equal(mgr.quickPatrol(true).ok, true);
+  const d0 = mgr.profile.diamond;
+  assert.equal(mgr.quickPatrol(false).ok, true);
+  assert.equal(d0 - mgr.profile.diamond, PATROL_RULES.quickDiamondCost);
+  assert.equal(mgr.quickPatrol(false).ok, true);
+  assert.equal(mgr.quickPatrol(false).ok, false, '超出每日上限');
+  clock.t += 24 * HOUR;
+  assert.equal(mgr.quickPatrolLeft(), PATROL_RULES.quickDailyLimit, '跨天重置');
+});
+
+test('16. 城防基地 + 天赋 + 神兵 进入战斗加成', () => {
+  const clock = makeClock();
+  const mgr = new PlayerDataManager(new MemRepo(), clock.now);
+  const b0 = mgr.getLordBattleBonus();
+
+  assert.equal(mgr.upgradeBaseTech('B_WALL').ok, false, '主公等级不足时基地未解锁');
+  mgr.profile.level = 10;
+  mgr.profile.gold = 100000;
+  mgr.profile.forgeStone = 1000;
+  mgr.profile.diamond = 5000;
+  const c0 = baseTechCost(0);
+  const g0 = mgr.profile.gold;
+  assert.equal(mgr.upgradeBaseTech('B_WALL').ok, true);
+  assert.equal(g0 - mgr.profile.gold, c0.gold);
+  mgr.upgradeBaseTech('B_TOWER');
+  mgr.upgradeBaseTech('B_BARRICADE');
+  mgr.upgradeBaseTech('B_GRANARY');
+  assert.equal(mgr.profile.maxStamina, 55);
+
+  for (let i = 0; i < 3; i++) mgr.upgradeTalent('T_ATK');
+  mgr.upgradeTalent('T_REDUCE');
+  mgr.upgradeTalent('T_EXP');
+  mgr.upgradeTalent('T_HERO');
+  assert.equal(mgr.talentPointsUsed(), 6);
+  for (let i = 0; i < 10; i++) mgr.upgradeTalent('T_STAMINA');
+  assert.equal(mgr.talentPointsUsed(), 9, '天赋点不能超过主公等级-1');
+
+  assert.equal(mgr.buyWeapon('pili').ok, false, '霹雳雷弩需 12 级');
+  assert.equal(mgr.buyWeapon('zhuge').ok, true);
+  assert.equal(mgr.profile.weaponId, 'zhuge');
+
+  const b1 = mgr.getLordBattleBonus();
+  assert.ok(b1.maxWallHp > b0.maxWallHp);
+  assert.equal(b1.towerLevel, 1);
+  assert.equal(b1.barricadeLevel, 1);
+  assert.equal(b1.weaponId, 'zhuge');
+  assert.equal(b1.wallReducePct, 1.5);
+  assert.equal(b1.expGainPct, 4);
+  assert.ok((b1.gemEffects.hero_dmg_pct || 0) >= 3);
+
+  // 无武将时敌军能压到城下，箭塔应参与输出
+  const noHeroes = JSON.parse(JSON.stringify(mgr.profile.heroes));
+  for (const h of Object.values(noHeroes)) h.unlocked = false;
+  const w = runAuto(new BattleWorld(2, noHeroes, b1, { seed: 77 }));
+  assert.ok((w.damageStats.TOWER || 0) > 0, '箭塔应造成伤害');
+
+  const r = mgr.resetTalents();
+  assert.equal(r.ok, true);
+  assert.equal(mgr.talentPointsUsed(), 0);
+  assert.equal(WEAPON_CONFIGS.length >= 4, true);
+});
+
+test('17. 激励视频每日上限：用完后拒绝并跨天重置', async () => {
+  const clock = makeClock();
+  const mgr = new PlayerDataManager(new MemRepo(), clock.now);
+  const ad = new WechatAdService('', mgr);
+  const limit = AD_DAILY_LIMITS.daily_stamina;
+  for (let i = 0; i < limit; i++) {
+    const r = await ad.showRewardedAd('daily_stamina');
+    assert.equal(r.completed, true);
+  }
+  const blocked = await ad.showRewardedAd('daily_stamina');
+  assert.equal(blocked.completed, false);
+  assert.equal(blocked.reason, 'limit');
+  assert.equal(mgr.adLeft('daily_stamina'), 0);
+  clock.t += 24 * HOUR;
+  assert.equal(mgr.adLeft('daily_stamina'), limit);
+});

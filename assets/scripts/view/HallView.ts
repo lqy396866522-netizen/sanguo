@@ -1,5 +1,6 @@
 import { Node, Graphics } from 'cc';
 import { STAGE_CONFIGS, HERO_CONFIGS } from '../core/configs.ts';
+import { CHALLENGE_RULES, PATROL_RULES, patrolHourlyYield } from '../core/phase2Configs.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
 import type { IAdService, IShopService } from '../sdk/MockServices.ts';
 import {
@@ -14,7 +15,7 @@ import {
 import { ArtAssetManager } from './ArtAssetManager';
 
 export interface HallCallbacks {
-  onStartBattle: (stageId: number) => void;
+  onStartBattle: (stageId: number, challenge: boolean) => void;
   onSwitchTab: (tab: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => void;
 }
 
@@ -25,6 +26,7 @@ export class HallView {
   private shopService: IShopService;
   private cb: HallCallbacks;
   private selectedStageId: number;
+  private challengeMode = false;
 
   constructor(
     root: Node,
@@ -50,6 +52,7 @@ export class HallView {
     // 背景
     const bg = createUINode('HallBg', 750, 1334, this.root, 0, 0);
     drawRoundedBox(bg, 750, 1334, '#2A1D35', 255, 0);
+    ArtAssetManager.createSpriteNode(bg, 'bg_hall', 750, 1334, 0, 0);
 
     // 顶部主公资产栏（避开微信胶囊安全区）
     const topBar = createUINode('TopBar', 710, 88, this.root, 0, 555);
@@ -59,7 +62,12 @@ export class HallView {
     createLabel(topBar, `元宝 ${p.diamond}`, 20, '#81D4FA', -65, 0, 130, 30);
     createLabel(topBar, `铜钱 ${p.gold}`, 20, '#FFE082', 80, 0, 140, 30);
     createLabel(topBar, `粮草 ${p.stamina}/${p.maxStamina}`, 20, '#FF8A65', 230, 10, 160, 28);
-    createButton(topBar, '+15(广告)', 110, 30, '#388E3C', async () => {
+    const staminaAdLeft = this.dataMgr.adLeft('daily_stamina');
+    createButton(topBar, `+15(广告${staminaAdLeft})`, 120, 30, staminaAdLeft > 0 ? '#388E3C' : '#546E7A', async () => {
+      if (staminaAdLeft <= 0) {
+        showToast(this.root, '今日广告补粮次数已用完');
+        return;
+      }
       const res = await this.adService.showRewardedAd('daily_stamina');
       if (res.completed) {
         this.dataMgr.addStamina(15);
@@ -153,33 +161,53 @@ export class HallView {
       }, bx, 0, 18, reached && !claimed ? '#FFD54F' : '#7E57C2');
     }
 
-    // 难度切换 + 巡逻预留 + 开始战斗
-    createButton(this.root, '普通模式', 180, 52, '#F9A825', () => {}, -110, -140, 22, '#FFF59D', '#212121');
-    createButton(this.root, '挑战(二期)', 180, 52, '#37474F', () => {
-      showToast(this.root, '精英挑战难度将在二期开放');
-    }, 110, -140, 22, '#78909C');
+    // 难度切换 + 巡逻 + 开始战斗
+    const challengeOpen = this.dataMgr.isChallengeUnlocked(stage.stageId);
+    if (!challengeOpen) this.challengeMode = false;
+    createButton(this.root, '普通模式', 180, 52, this.challengeMode ? '#37474F' : '#F9A825', () => {
+      this.challengeMode = false;
+      this.render();
+    }, -110, -140, 22, this.challengeMode ? '#78909C' : '#FFF59D', this.challengeMode ? '#E0E0E0' : '#212121');
+    const cStars = this.dataMgr.challengeStars(stage.stageId);
+    createButton(
+      this.root,
+      challengeOpen ? `精英挑战${cStars > 0 ? ` ${'★'.repeat(cStars)}` : ''}` : '挑战 (3星解锁)',
+      180, 52,
+      this.challengeMode ? '#C62828' : '#37474F',
+      () => {
+        if (!challengeOpen) {
+          showToast(this.root, `本关普通难度 ${CHALLENGE_RULES.unlockStars} 星通关后解锁精英挑战`);
+          return;
+        }
+        this.challengeMode = true;
+        this.render();
+      },
+      110, -140, 20, this.challengeMode ? '#FF8A80' : '#78909C'
+    );
 
-    createButton(this.root, '巡逻\n(挂机)', 110, 96, '#2E7D32', () => {
-      showToast(this.root, '离线巡逻挂机将在二期开放');
+    const pending = this.dataMgr.getPatrolPending();
+    createButton(this.root, `巡逻\n${pending.hours >= 1 ? '可领取' : '挂机中'}`, 110, 96, pending.hours >= 1 ? '#F57F17' : '#2E7D32', () => {
+      this.showPatrolModal();
     }, -250, -250, 20, '#81C784');
 
     const unlockedStage = stage.stageId <= p.maxClearedStage + 1;
+    const cost = this.challengeMode ? CHALLENGE_RULES.staminaCost : stage.costStamina;
     createButton(
       this.root,
-      unlockedStage ? `开始战斗 (粮草×${stage.costStamina})` : '需先通关前置关卡',
+      unlockedStage ? `${this.challengeMode ? '挑战' : '开始战斗'} (粮草×${cost})` : '需先通关前置关卡',
       380,
       96,
-      unlockedStage ? '#FFB300' : '#546E7A',
+      unlockedStage ? (this.challengeMode ? '#D84315' : '#FFB300') : '#546E7A',
       () => {
         if (!unlockedStage) {
           showToast(this.root, '请先通关前置关卡!');
           return;
         }
-        if (!this.dataMgr.consumeStamina(stage.costStamina)) {
+        if (!this.dataMgr.consumeStamina(cost)) {
           showToast(this.root, '粮草不足，请点击顶部 +15 补充!');
           return;
         }
-        this.cb.onStartBattle(stage.stageId);
+        this.cb.onStartBattle(stage.stageId, this.challengeMode);
       },
       75,
       -250,
@@ -194,6 +222,64 @@ export class HallView {
     createLabel(ticker, `军情提示：${stage.bossHint}`, 18, '#CE93D8', 0, 0, 640, 32);
 
     this.renderBottomTabs('hall');
+  }
+
+  private showPatrolModal(): void {
+    const mask = createModalOverlay(this.root);
+    const box = createUINode('PatrolBox', 620, 560, mask, 0, 0);
+    drawRoundedBox(box, 620, 560, '#1E2A1E', 255, 18, '#81C784', 2);
+    createLabel(box, '边境巡逻', 32, '#C5E1A5', 0, 230, 400, 44);
+
+    const p = this.dataMgr.getPatrolPending();
+    const y = patrolHourlyYield(this.dataMgr.profile.maxClearedStage, this.dataMgr.profile.baseTech.B_GRANARY || 0);
+    const h = Math.floor(p.hours);
+    const m = Math.floor((p.hours - h) * 60);
+    createLabel(box, `已巡逻 ${h} 小时 ${m} 分（上限 ${PATROL_RULES.maxHours} 小时）`, 20, '#FFFFFF', 0, 170, 560, 30);
+    createLabel(box, `每小时：铜钱 ${y.gold} · 主公经验 ${y.exp} · 锻造石 ${y.forgeStone}`, 17, '#A5D6A7', 0, 130, 560, 28);
+    createLabel(box, `待领取\n铜钱 +${p.gold}   经验 +${p.exp}   锻造石 +${p.forgeStone}`, 22, '#FFE082', 0, 60, 560, 80);
+
+    const done = (r: { ok: boolean; msg: string }) => {
+      showToast(this.root, r.msg);
+      if (r.ok) {
+        mask.destroy();
+        this.render();
+      }
+    };
+
+    createButton(box, '领取', 200, 58, '#2E7D32', () => done(this.dataMgr.claimPatrol(false)), -115, -40, 22);
+    const dblLeft = this.dataMgr.adLeft('patrol_double');
+    createButton(box, `双倍领取 (广告 ${dblLeft})`, 220, 58, dblLeft > 0 ? '#F57F17' : '#546E7A', async () => {
+      if (p.gold <= 0) {
+        showToast(this.root, '巡逻时间太短，暂无收益');
+        return;
+      }
+      const res = await this.adService.showRewardedAd('patrol_double');
+      if (res.completed) done(this.dataMgr.claimPatrol(true));
+      else showToast(this.root, dblLeft <= 0 ? '今日双倍次数已用完' : '广告未看完');
+    }, 115, -40, 19);
+
+    const quickLeft = this.dataMgr.quickPatrolLeft();
+    const freeQuick = this.dataMgr.adLeft('patrol_quick') > 0;
+    createLabel(box, `快速巡逻：立即获得 ${PATROL_RULES.quickHours} 小时收益（今日剩余 ${quickLeft} 次）`, 18, '#E0E0E0', 0, -120, 560, 28);
+    createButton(
+      box,
+      freeQuick ? '快速巡逻 (广告免费)' : `快速巡逻 (${PATROL_RULES.quickDiamondCost} 元宝)`,
+      300, 58, quickLeft > 0 ? '#1565C0' : '#546E7A',
+      async () => {
+        if (quickLeft <= 0) {
+          showToast(this.root, '今日快速巡逻次数已用完');
+          return;
+        }
+        if (freeQuick) {
+          const res = await this.adService.showRewardedAd('patrol_quick');
+          if (res.completed) done(this.dataMgr.quickPatrol(true));
+        } else {
+          done(this.dataMgr.quickPatrol(false));
+        }
+      },
+      0, -175, 20
+    );
+    createButton(box, '关闭', 160, 50, '#455A64', () => mask.destroy(), 0, -245, 20);
   }
 
   private showStageInfoModal(stageId: number): void {
@@ -217,7 +303,7 @@ export class HallView {
       { key: 'lord', label: '主公' },
       { key: 'hall', label: '征战' },
       { key: 'hero', label: '武将' },
-      { key: 'base', label: '城防\n(二期)' },
+      { key: 'base', label: '城防' },
     ];
     tabs.forEach((t, idx) => {
       const x = -280 + idx * 140;

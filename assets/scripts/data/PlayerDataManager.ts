@@ -1,4 +1,5 @@
 import type {
+  BattleReport,
   BattleReward,
   EquipSlotData,
   EquipSlotType,
@@ -12,16 +13,49 @@ import {
   HERO_CONFIGS,
   SLOT_GEM_POOL,
 } from '../core/configs.ts';
+import {
+  AD_DAILY_LIMITS,
+  BASE_TECH_CONFIGS,
+  BASE_UNLOCK_LORD_LEVEL,
+  CHALLENGE_RULES,
+  PATROL_RULES,
+  TALENT_CONFIGS,
+  WEAPON_CONFIGS,
+  baseTechCost,
+  getWeaponConfig,
+  patrolHourlyYield,
+  talentPointsForLevel,
+} from '../core/phase2Configs.ts';
 import type { IDataRepository } from './IDataRepository.ts';
 import type { LordBattleBonus } from '../core/BattleWorld.ts';
+
+export const SCHEMA_VERSION = 3;
+const BASE_MAX_STAMINA = 50;
+const TALENT_RESET_DIAMOND = 100;
+
+export interface OpResult {
+  ok: boolean;
+  msg: string;
+}
+
+export interface PatrolPending {
+  hours: number;
+  gold: number;
+  exp: number;
+  forgeStone: number;
+}
 
 export class PlayerDataManager {
   private repo: IDataRepository;
   public profile: PlayerProfile;
   private uidSeq = 1;
+  private now: () => number;
+  // 最近一局战报，联网模式下由 HttpRepository 提交服务端回放校验
+  public lastBattleReport: BattleReport | null = null;
 
-  constructor(repo: IDataRepository) {
+  constructor(repo: IDataRepository, now: () => number = () => Date.now()) {
     this.repo = repo;
+    this.now = now;
     const loaded = this.repo.loadProfile();
     if (loaded) {
       this.profile = loaded;
@@ -35,13 +69,34 @@ export class PlayerDataManager {
             g.affixValue = 15;
           }
         }
-        this.save();
+      }
+      // v2 -> v3：补齐挑战/巡逻/城防基地/天赋/神兵/广告次数字段
+      if (this.profile.schemaVersion < 3) {
+        this.profile.schemaVersion = SCHEMA_VERSION;
+        this.fillV3Fields(this.profile);
       }
       this.syncUnlockConditions();
+      this.syncMaxStamina();
+      this.save();
     } else {
       this.profile = this.createDefaultProfile();
       this.save();
     }
+  }
+
+  private fillV3Fields(p: PlayerProfile): void {
+    p.challengeProgress = p.challengeProgress || {};
+    p.patrol = p.patrol || { lastClaimAt: this.now(), quickDay: '', quickUsed: 0 };
+    p.baseTech = p.baseTech || {};
+    p.talents = p.talents || {};
+    p.weaponId = p.weaponId || 'crossbow';
+    p.ownedWeapons = p.ownedWeapons || ['crossbow'];
+    p.adDaily = p.adDaily || { day: '', counts: {} };
+  }
+
+  private dayKey(): string {
+    const d = new Date(this.now());
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
   }
 
   public save(): void {
@@ -92,8 +147,8 @@ export class PlayerDataManager {
       this.makeGem(1, 1, 'atk_flat'),
     ];
 
-    return {
-      schemaVersion: 2,
+    const profile: PlayerProfile = {
+      schemaVersion: SCHEMA_VERSION,
       nickname: '乱世主公',
       level: 1,
       exp: 0,
@@ -109,7 +164,9 @@ export class PlayerDataManager {
       gems: starterGems,
       heroes,
       stageProgress: {},
-    };
+    } as PlayerProfile;
+    this.fillV3Fields(profile);
+    return profile;
   }
 
   public makeGem(slotType: EquipSlotType, quality: number, affixType?: GemAffixType): GemItem {
@@ -171,13 +228,199 @@ export class PlayerDataManager {
     critRate += (gemEffects.crit_rate || 0) / 100;
     critDmg += (gemEffects.crit_dmg || 0) / 100;
 
+    // 二期：天赋 / 城防基地 / 神兵
+    const tv = (id: string) => this.talentValue(id);
+    const bv = (id: string) => this.baseTechValue(id);
+    atk = Math.round(atk * (1 + tv('T_ATK') / 100));
+    critRate += tv('T_CRIT') / 100;
+    critDmg += tv('T_CRITDMG') / 100;
+    wallHp = Math.round(wallHp * (1 + (tv('T_WALL') + bv('B_WALL')) / 100));
+    if (tv('T_HERO') > 0) gemEffects.hero_dmg_pct = (gemEffects.hero_dmg_pct || 0) + tv('T_HERO');
+    if (tv('T_IMMUNE') > 0) gemEffects.wall_immune_hits = (gemEffects.wall_immune_hits || 0) + tv('T_IMMUNE');
+
     return {
       baseAtk: atk,
       maxWallHp: wallHp,
       critRate: Math.min(0.9, critRate),
       globalCritDmgBonus: critDmg,
       gemEffects,
+      expGainPct: tv('T_EXP') + bv('B_BEACON'),
+      wallReducePct: tv('T_REDUCE'),
+      towerLevel: this.profile.baseTech.B_TOWER || 0,
+      barricadeLevel: this.profile.baseTech.B_BARRICADE || 0,
+      weaponId: this.profile.weaponId,
     };
+  }
+
+  // ---------- 天赋 ----------
+  public talentValue(id: string): number {
+    const cfg = TALENT_CONFIGS.find((t) => t.id === id);
+    return cfg ? (this.profile.talents[id] || 0) * cfg.perLevel : 0;
+  }
+
+  public talentPointsTotal(): number {
+    return talentPointsForLevel(this.profile.level);
+  }
+
+  public talentPointsUsed(): number {
+    return Object.values(this.profile.talents).reduce((a, b) => a + b, 0);
+  }
+
+  public upgradeTalent(id: string): OpResult {
+    const cfg = TALENT_CONFIGS.find((t) => t.id === id);
+    if (!cfg) return { ok: false, msg: '天赋不存在' };
+    const lv = this.profile.talents[id] || 0;
+    if (lv >= cfg.maxLevel) return { ok: false, msg: '已满级' };
+    if (this.talentPointsUsed() >= this.talentPointsTotal()) return { ok: false, msg: '天赋点不足（主公升级获得）' };
+    this.profile.talents[id] = lv + 1;
+    this.syncMaxStamina();
+    this.save();
+    return { ok: true, msg: `${cfg.name} 提升至 ${lv + 1} 级` };
+  }
+
+  public resetTalents(): OpResult {
+    if (this.talentPointsUsed() === 0) return { ok: false, msg: '尚未分配天赋点' };
+    if (this.profile.diamond < TALENT_RESET_DIAMOND) return { ok: false, msg: `元宝不足（需 ${TALENT_RESET_DIAMOND}）` };
+    this.profile.diamond -= TALENT_RESET_DIAMOND;
+    this.profile.talents = {};
+    this.syncMaxStamina();
+    this.save();
+    return { ok: true, msg: '天赋点已全部返还' };
+  }
+
+  // ---------- 城防基地 ----------
+  public isBaseUnlocked(): boolean {
+    return this.profile.level >= BASE_UNLOCK_LORD_LEVEL;
+  }
+
+  public baseTechValue(id: string): number {
+    const cfg = BASE_TECH_CONFIGS.find((t) => t.id === id);
+    return cfg ? (this.profile.baseTech[id] || 0) * cfg.perLevel : 0;
+  }
+
+  public upgradeBaseTech(id: string): OpResult {
+    if (!this.isBaseUnlocked()) return { ok: false, msg: `主公 ${BASE_UNLOCK_LORD_LEVEL} 级解锁城防基地` };
+    const cfg = BASE_TECH_CONFIGS.find((t) => t.id === id);
+    if (!cfg) return { ok: false, msg: '建筑不存在' };
+    const lv = this.profile.baseTech[id] || 0;
+    if (lv >= cfg.maxLevel) return { ok: false, msg: '已满级' };
+    const cost = baseTechCost(lv);
+    if (this.profile.gold < cost.gold) return { ok: false, msg: '铜钱不足' };
+    if (this.profile.forgeStone < cost.forgeStone) return { ok: false, msg: '锻造石不足' };
+    this.profile.gold -= cost.gold;
+    this.profile.forgeStone -= cost.forgeStone;
+    this.profile.baseTech[id] = lv + 1;
+    this.syncMaxStamina();
+    this.save();
+    return { ok: true, msg: `${cfg.name} 升至 ${lv + 1} 级` };
+  }
+
+  public syncMaxStamina(): void {
+    this.profile.maxStamina = BASE_MAX_STAMINA + this.talentValue('T_STAMINA') + this.baseTechValue('B_GRANARY');
+  }
+
+  // ---------- 神兵 ----------
+  public buyWeapon(id: string): OpResult {
+    const cfg = WEAPON_CONFIGS.find((w) => w.id === id);
+    if (!cfg) return { ok: false, msg: '神兵不存在' };
+    if (this.profile.ownedWeapons.includes(id)) return { ok: false, msg: '已拥有' };
+    if (this.profile.level < cfg.unlockLordLevel) return { ok: false, msg: `主公 ${cfg.unlockLordLevel} 级解锁` };
+    if (this.profile.diamond < cfg.costDiamond) return { ok: false, msg: '元宝不足' };
+    this.profile.diamond -= cfg.costDiamond;
+    this.profile.ownedWeapons.push(id);
+    this.profile.weaponId = id;
+    this.save();
+    return { ok: true, msg: `获得神兵【${cfg.name}】并已装备` };
+  }
+
+  public equipWeapon(id: string): OpResult {
+    if (!this.profile.ownedWeapons.includes(id)) return { ok: false, msg: '尚未拥有' };
+    this.profile.weaponId = id;
+    this.save();
+    return { ok: true, msg: `已装备【${getWeaponConfig(id).name}】` };
+  }
+
+  // ---------- 激励视频每日次数 ----------
+  private rollAdDay(): void {
+    const day = this.dayKey();
+    if (this.profile.adDaily.day !== day) this.profile.adDaily = { day, counts: {} };
+  }
+
+  public adLeft(placement: string): number {
+    this.rollAdDay();
+    const limit = AD_DAILY_LIMITS[placement] ?? 99;
+    return Math.max(0, limit - (this.profile.adDaily.counts[placement] || 0));
+  }
+
+  public recordAdWatched(placement: string): void {
+    this.rollAdDay();
+    this.profile.adDaily.counts[placement] = (this.profile.adDaily.counts[placement] || 0) + 1;
+    this.save();
+  }
+
+  // ---------- 精英挑战 ----------
+  public isChallengeUnlocked(stageId: number): boolean {
+    return (this.profile.stageProgress[stageId]?.bestStars || 0) >= CHALLENGE_RULES.unlockStars;
+  }
+
+  public challengeStars(stageId: number): number {
+    return this.profile.challengeProgress[stageId]?.bestStars || 0;
+  }
+
+  // ---------- 巡逻挂机 ----------
+  public getPatrolPending(): PatrolPending {
+    const elapsedH = Math.max(0, (this.now() - this.profile.patrol.lastClaimAt) / 3600000);
+    const hours = Math.min(PATROL_RULES.maxHours, elapsedH);
+    return this.patrolYield(hours);
+  }
+
+  private patrolYield(hours: number): PatrolPending {
+    const y = patrolHourlyYield(this.profile.maxClearedStage, this.profile.baseTech.B_GRANARY || 0);
+    return {
+      hours,
+      gold: Math.floor(y.gold * hours),
+      exp: Math.floor(y.exp * hours),
+      forgeStone: Math.floor(y.forgeStone * hours),
+    };
+  }
+
+  private grantPatrol(p: PatrolPending, mult: number): void {
+    this.profile.gold += p.gold * mult;
+    this.profile.forgeStone += p.forgeStone * mult;
+    this.addLordExp(p.exp * mult);
+  }
+
+  public claimPatrol(double = false): { ok: boolean; msg: string; reward?: PatrolPending } {
+    const p = this.getPatrolPending();
+    if (p.gold <= 0 && p.exp <= 0) return { ok: false, msg: '巡逻时间太短，暂无收益' };
+    this.grantPatrol(p, double ? 2 : 1);
+    this.profile.patrol.lastClaimAt = this.now();
+    this.save();
+    return { ok: true, msg: double ? '双倍领取巡逻收益' : '领取巡逻收益', reward: p };
+  }
+
+  public quickPatrolLeft(): number {
+    if (this.profile.patrol.quickDay !== this.dayKey()) return PATROL_RULES.quickDailyLimit;
+    return Math.max(0, PATROL_RULES.quickDailyLimit - this.profile.patrol.quickUsed);
+  }
+
+  // 每日第 1 次可看广告免费，之后消耗元宝
+  public quickPatrol(viaAd: boolean): { ok: boolean; msg: string; reward?: PatrolPending } {
+    const day = this.dayKey();
+    if (this.profile.patrol.quickDay !== day) {
+      this.profile.patrol.quickDay = day;
+      this.profile.patrol.quickUsed = 0;
+    }
+    if (this.profile.patrol.quickUsed >= PATROL_RULES.quickDailyLimit) return { ok: false, msg: '今日快速巡逻次数已用完' };
+    if (!viaAd) {
+      if (this.profile.diamond < PATROL_RULES.quickDiamondCost) return { ok: false, msg: '元宝不足' };
+      this.profile.diamond -= PATROL_RULES.quickDiamondCost;
+    }
+    this.profile.patrol.quickUsed++;
+    const p = this.patrolYield(PATROL_RULES.quickHours);
+    this.grantPatrol(p, 1);
+    this.save();
+    return { ok: true, msg: `快速巡逻获得 ${PATROL_RULES.quickHours} 小时收益`, reward: p };
   }
 
   public getCombatPower(): number {
@@ -372,7 +615,24 @@ export class PlayerDataManager {
     this.save();
   }
 
-  public applyBattleSettle(stageId: number, stars: number, reward: BattleReward): void {
+  public applyBattleSettle(stageId: number, stars: number, reward: BattleReward, report?: BattleReport): void {
+    if (report) this.lastBattleReport = report;
+    const goldBonus = this.talentValue('T_GOLD');
+    if (goldBonus > 0) reward.gold = Math.round(reward.gold * (1 + goldBonus / 100));
+
+    if (report?.challenge) {
+      // 挑战模式：只记挑战星级，首通额外元宝，不重复推进普通关卡进度
+      const prev = this.profile.challengeProgress[stageId]?.bestStars || 0;
+      if (stars > 0) {
+        if (prev === 0) reward.diamond += CHALLENGE_RULES.firstClearDiamond;
+        this.profile.challengeProgress[stageId] = { bestStars: Math.max(prev, stars) };
+      }
+      this.grantExtraReward(reward, false);
+      this.addLordExp(reward.exp);
+      this.save();
+      return;
+    }
+
     this.profile.gold += reward.gold;
     this.profile.diamond += reward.diamond;
     this.profile.forgeStone += reward.forgeStone;
@@ -397,6 +657,18 @@ export class PlayerDataManager {
     }
     this.addLordExp(reward.exp);
     this.save();
+  }
+
+  // 双倍领取等额外发放：只加资源，不推进进度、不再掉落装备宝石
+  public grantExtraReward(reward: BattleReward, persist = true): void {
+    this.profile.gold += reward.gold;
+    this.profile.diamond += reward.diamond;
+    this.profile.forgeStone += reward.forgeStone;
+    this.profile.refineStone += reward.refineStone;
+    if (reward.shardHeroId && this.profile.heroes[reward.shardHeroId]) {
+      this.profile.heroes[reward.shardHeroId].shards += reward.shardCount;
+    }
+    if (persist) this.save();
   }
 
   public claimStageBox(stageId: number, starIdx: 1 | 2 | 3): { ok: boolean; msg: string } {

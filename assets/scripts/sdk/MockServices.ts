@@ -7,7 +7,9 @@ export type AdPlacement =
   | 'battle_double_reward'
   | 'battle_speed_2x'
   | 'daily_stamina'
-  | 'shop_free_chest';
+  | 'shop_free_chest'
+  | 'patrol_double'
+  | 'patrol_quick';
 
 export interface IAdService {
   isReady(placement: AdPlacement): boolean;

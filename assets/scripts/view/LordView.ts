@@ -6,6 +6,12 @@ import {
   QUALITY_NAMES,
 } from '../core/configs.ts';
 import type { EquipSlotType, GemItem } from '../core/types.ts';
+import {
+  TALENT_BRANCH_NAMES,
+  TALENT_CONFIGS,
+  WEAPON_CONFIGS,
+  type TalentBranch,
+} from '../core/phase2Configs.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
 import {
   createButton,
@@ -50,12 +56,13 @@ export class LordView {
     createLabel(top, `攻:${bonus.baseAtk}  防:${bonus.maxWallHp}`, 19, '#80CBC4', 70, 0, 210, 30);
     createLabel(top, `铜钱:${p.gold}`, 19, '#FFE082', 255, 0, 160, 30);
 
-    // 左侧二期预留入口（天赋 / 主公 / 兵符 / 神兵）
-    const sideItems = [
-      { label: '天赋\n(二期)', act: false },
-      { label: '主公', act: true },
-      { label: '兵符\n(三期)', act: false },
-      { label: '神兵\n(二期)', act: false },
+    // 左侧入口（天赋 / 主公 / 兵符 / 神兵）
+    const freePts = this.dataMgr.talentPointsTotal() - this.dataMgr.talentPointsUsed();
+    const sideItems: { label: string; act: boolean; onClick: () => void }[] = [
+      { label: freePts > 0 ? `天赋\n+${freePts}` : '天赋', act: false, onClick: () => this.showTalentModal() },
+      { label: '主公', act: true, onClick: () => {} },
+      { label: '兵符\n(三期)', act: false, onClick: () => showToast(this.root, '兵符系统将在三期开放') },
+      { label: '神兵', act: false, onClick: () => this.showWeaponModal() },
     ];
     sideItems.forEach((it, i) => {
       createButton(
@@ -64,9 +71,7 @@ export class LordView {
         82,
         66,
         it.act ? '#FFB300' : '#2C223B',
-        () => {
-          if (!it.act) showToast(this.root, `${it.label.replace('\n', '')}将在后续版本开放`);
-        },
+        it.onClick,
         -310,
         420 - i * 82,
         16,
@@ -297,5 +302,96 @@ export class LordView {
     }, 115, -75, 20);
 
     createButton(box, '关闭', 170, 48, '#5E35B1', () => mask.destroy(), 0, -142, 20);
+  }
+
+  private showTalentModal(): void {
+    const mask = createModalOverlay(this.root);
+    const box = createUINode('TalentModal', 700, 1000, mask, 0, 20);
+    drawRoundedBox(box, 700, 1000, '#1F1730', 255, 18, '#FFB300', 2);
+    const total = this.dataMgr.talentPointsTotal();
+    const used = this.dataMgr.talentPointsUsed();
+    createLabel(box, '主公天赋', 32, '#FFD54F', 0, 455, 400, 44);
+    createLabel(box, `可用天赋点 ${total - used} / ${total}（主公每升 1 级获得 1 点）`, 19, '#E0E0E0', 0, 410, 640, 30);
+
+    const reopen = () => {
+      mask.destroy();
+      this.render();
+      this.showTalentModal();
+    };
+
+    const branches: TalentBranch[] = ['atk', 'def', 'res'];
+    branches.forEach((br, bi) => {
+      const col = createUINode(`Br_${br}`, 220, 780, box, (bi - 1) * 228, -20);
+      drawRoundedBox(col, 220, 780, '#2A2040', 230, 14, br === 'atk' ? '#EF5350' : br === 'def' ? '#42A5F5' : '#66BB6A', 2);
+      createLabel(col, TALENT_BRANCH_NAMES[br], 26, '#FFFFFF', 0, 355, 200, 36);
+      TALENT_CONFIGS.filter((t) => t.branch === br).forEach((t, i) => {
+        const lv = this.dataMgr.profile.talents[t.id] || 0;
+        const y = 260 - i * 175;
+        const cell = createUINode(`T_${t.id}`, 200, 160, col, 0, y);
+        drawRoundedBox(cell, 200, 160, '#191226', 240, 12, lv > 0 ? '#FFD54F' : '#5E35B1', 2);
+        createLabel(cell, `${t.name}  ${lv}/${t.maxLevel}`, 20, '#FFE082', 0, 52, 190, 30);
+        const v = Math.max(1, lv) * t.perLevel;
+        createLabel(cell, t.desc.replace('{v}', String(Number(v.toFixed(1)))), 16, '#E0E0E0', 0, 8, 186, 50);
+        const full = lv >= t.maxLevel;
+        createButton(cell, full ? '已满级' : '加点', 120, 40, full ? '#546E7A' : '#2E7D32', () => {
+          const r = this.dataMgr.upgradeTalent(t.id);
+          showToast(this.root, r.msg);
+          if (r.ok) reopen();
+        }, 0, -50, 18);
+      });
+    });
+
+    createButton(box, '重置天赋 (100 元宝)', 240, 52, '#6D4C41', () => {
+      const r = this.dataMgr.resetTalents();
+      showToast(this.root, r.msg);
+      if (r.ok) reopen();
+    }, -130, -450, 19);
+    createButton(box, '关闭', 200, 52, '#5E35B1', () => {
+      mask.destroy();
+      this.render();
+    }, 140, -450, 20);
+  }
+
+  private showWeaponModal(): void {
+    const mask = createModalOverlay(this.root);
+    const box = createUINode('WeaponModal', 680, 900, mask, 0, 20);
+    drawRoundedBox(box, 680, 900, '#1F1730', 255, 18, '#4DD0E1', 2);
+    const p = this.dataMgr.profile;
+    createLabel(box, '神兵库', 32, '#4DD0E1', 0, 405, 400, 44);
+    createLabel(box, `元宝 ${p.diamond}  ·  神兵改变主公弩箭外观并附带专属被动`, 18, '#E0E0E0', 0, 362, 620, 30);
+
+    WEAPON_CONFIGS.forEach((w, i) => {
+      const y = 250 - i * 170;
+      const owned = p.ownedWeapons.includes(w.id);
+      const equipped = p.weaponId === w.id;
+      const cell = createUINode(`W_${w.id}`, 620, 150, box, 0, y);
+      drawRoundedBox(cell, 620, 150, '#191226', 240, 14, equipped ? '#FFD54F' : w.bulletColor, equipped ? 3 : 2);
+      const g = createUINode('Bolt', 100, 100, cell, 0, 0).addComponent(Graphics);
+      g.strokeColor = hexToColor(w.bulletColor, 255);
+      g.lineWidth = 6;
+      g.moveTo(-280, -20);
+      g.lineTo(-210, 30);
+      g.stroke();
+      createLabel(cell, w.name, 24, w.bulletColor, -60, 40, 300, 32);
+      createLabel(cell, w.desc, 17, '#E0E0E0', -60, 0, 320, 30);
+      createLabel(cell, owned ? '已拥有' : `主公 Lv.${w.unlockLordLevel} 解锁 · ${w.costDiamond} 元宝`, 16, owned ? '#A5D6A7' : '#FFAB91', -60, -38, 320, 28);
+
+      let text = '装备';
+      let color = '#1565C0';
+      if (equipped) { text = '使用中'; color = '#546E7A'; }
+      else if (!owned) { text = '购买'; color = p.level >= w.unlockLordLevel ? '#F57F17' : '#546E7A'; }
+      createButton(cell, text, 140, 54, color, () => {
+        if (equipped) return;
+        const r = owned ? this.dataMgr.equipWeapon(w.id) : this.dataMgr.buyWeapon(w.id);
+        showToast(this.root, r.msg);
+        if (r.ok) {
+          mask.destroy();
+          this.render();
+          this.showWeaponModal();
+        }
+      }, 220, 0, 20);
+    });
+
+    createButton(box, '关闭', 200, 54, '#5E35B1', () => mask.destroy(), 0, -400, 20);
   }
 }

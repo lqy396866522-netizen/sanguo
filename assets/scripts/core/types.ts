@@ -178,7 +178,33 @@ export interface PlayerProfile {
   gems: GemItem[];
   heroes: Record<string, HeroSaveData>;
   stageProgress: Record<number, StageProgress>;
+  // v3 二期字段
+  challengeProgress: Record<number, { bestStars: number }>;
+  patrol: PatrolState;
+  baseTech: Record<string, number>;
+  talents: Record<string, number>;
+  weaponId: string;
+  ownedWeapons: string[];
+  adDaily: { day: string; counts: Record<string, number> };
   checksum?: string;
+}
+
+export interface PatrolState {
+  lastClaimAt: number; // 毫秒时间戳
+  quickDay: string;
+  quickUsed: number;
+}
+
+// 客户端提交给服务端回放校验的战报
+export interface BattleReport {
+  stageId: number;
+  challenge: boolean;
+  seed: number;
+  ops: unknown[];
+  stars: number;
+  kills: number;
+  wallHp: number;
+  ticks: number;
 }
 
 export interface RogueCard {

@@ -9,60 +9,88 @@ import {
 } from 'cc';
 import { LocalRepository } from './data/LocalRepository.ts';
 import { PlayerDataManager } from './data/PlayerDataManager.ts';
-import { MockAdService, MockShopService } from './sdk/MockServices.ts';
+import { HttpRepository } from './data/HttpRepository.ts';
+import { GAME_CONFIG } from './data/GameConfig.ts';
+import { MockShopService } from './sdk/MockServices.ts';
+import { WechatAdService } from './sdk/WechatAdService.ts';
 import { HallView } from './view/HallView';
 import { LordView } from './view/LordView';
 import { HeroBookView } from './view/HeroBookView';
+import { BaseView } from './view/BaseView';
 import { BattleView } from './view/BattleView';
 import { createButton, createLabel, createUINode, drawRoundedBox, showToast } from './view/UIFactory';
 import { ArtAssetManager } from './view/ArtAssetManager';
+import { AudioManager } from './view/AudioManager';
 
 const { ccclass } = _decorator;
+
+type TabKey = 'shop' | 'lord' | 'hall' | 'hero' | 'base';
 
 @ccclass('GameApp')
 export class GameApp extends Component {
   private dataMgr!: PlayerDataManager;
-  private adService = new MockAdService();
+  private adService = new WechatAdService(GAME_CONFIG.rewardedAdUnitId);
   private shopService = new MockShopService();
+  private httpRepo: HttpRepository | null = null;
 
   private viewRoot!: Node;
-  private currentTab: 'shop' | 'lord' | 'hall' | 'hero' | 'base' = 'hall';
+  private currentTab: TabKey = 'hall';
   private hallView: HallView | null = null;
   private battleView: BattleView | null = null;
 
   protected onLoad(): void {
     view.setDesignResolutionSize(750, 1334, ResolutionPolicy.FIXED_WIDTH);
-    this.dataMgr = new PlayerDataManager(new LocalRepository());
+    const local = new LocalRepository();
+    if (GAME_CONFIG.serverUrl) {
+      // 联网模式：本地存档作为离线缓存，启动后异步登录拉取服务端存档
+      this.httpRepo = new HttpRepository(GAME_CONFIG.serverUrl, local);
+    }
+    this.dataMgr = new PlayerDataManager(this.httpRepo || local);
+    this.adService.setCounter(this.dataMgr);
     this.viewRoot = createUINode('GameViewRoot', 750, 1334, this.node, 0, 0);
+    AudioManager.init(this.node);
     this.openTab('hall');
-    ArtAssetManager.loadAllDemoArt().then(() => {
-      if (!this.battleView && this.node && this.node.isValid) {
-        this.openTab(this.currentTab);
-      }
-    });
-  }
 
-  protected update(dt: number): void {
-    if (this.battleView) {
-      this.battleView.update(dt);
+    ArtAssetManager.loadCore().then(() => this.refreshIfIdle());
+    // 首屏后再预取战斗分包，避免阻塞启动
+    this.scheduleOnce(() => ArtAssetManager.loadBattle().then(() => this.refreshIfIdle()), 0.5);
+
+    if (this.httpRepo) {
+      this.httpRepo.login().then((remote) => {
+        if (remote) {
+          this.dataMgr = new PlayerDataManager(this.httpRepo!);
+          this.adService.setCounter(this.dataMgr);
+          this.refreshIfIdle();
+        }
+      });
     }
   }
 
-  private openTab(tab: 'shop' | 'lord' | 'hall' | 'hero' | 'base'): void {
+  private refreshIfIdle(): void {
+    if (!this.battleView && this.node && this.node.isValid) this.openTab(this.currentTab);
+  }
+
+  protected update(dt: number): void {
+    AudioManager.update(dt);
+    if (this.battleView) this.battleView.update(dt);
+  }
+
+  private openTab(tab: TabKey): void {
     this.currentTab = tab;
     this.battleView = null;
     this.hallView = null;
     this.viewRoot.removeAllChildren();
+    AudioManager.playBgm('bgm_hall');
 
-    const renderTabs = (active: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => {
+    const renderTabs = (active: TabKey) => {
       const bar = createUINode('BottomTabs', 750, 110, this.viewRoot, 0, -590);
       drawRoundedBox(bar, 750, 110, '#181122', 250, 0, '#5E35B1', 2);
-      const tabs: { key: 'shop' | 'lord' | 'hall' | 'hero' | 'base'; label: string }[] = [
-        { key: 'shop', label: '商店\n(预留)' },
+      const tabs: { key: TabKey; label: string }[] = [
+        { key: 'shop', label: '商店' },
         { key: 'lord', label: '主公' },
         { key: 'hall', label: '征战' },
         { key: 'hero', label: '武将' },
-        { key: 'base', label: '城防\n(二期)' },
+        { key: 'base', label: '城防' },
       ];
       tabs.forEach((t, idx) => {
         const x = -280 + idx * 140;
@@ -73,7 +101,10 @@ export class GameApp extends Component {
           126,
           84,
           isAct ? '#FFB300' : '#2C1F3D',
-          () => this.openTab(t.key),
+          () => {
+            AudioManager.playSfx('sfx_click');
+            this.openTab(t.key);
+          },
           x,
           4,
           isAct ? 22 : 19,
@@ -85,51 +116,82 @@ export class GameApp extends Component {
 
     if (tab === 'hall') {
       this.hallView = new HallView(this.viewRoot, this.dataMgr, this.adService, this.shopService, {
-        onStartBattle: (sid) => this.startBattle(sid),
+        onStartBattle: (sid, challenge) => this.startBattle(sid, challenge),
         onSwitchTab: (t) => this.openTab(t),
       });
     } else if (tab === 'lord') {
       new LordView(this.viewRoot, this.dataMgr, renderTabs);
     } else if (tab === 'hero') {
       new HeroBookView(this.viewRoot, this.dataMgr, renderTabs);
-    } else if (tab === 'shop') {
-      this.renderPlaceholder('军需商店（商业化预留）', '商城、月卡、首充及元宝十连宝箱将在二期接入微信支付后开放', 'shop', renderTabs);
+    } else if (tab === 'base') {
+      new BaseView(this.viewRoot, this.dataMgr, renderTabs);
     } else {
-      this.renderPlaceholder('城防基地（二期扩展）', '城墙防御科技、拒马陷阱与箭塔改造将在二期开放', 'base', renderTabs);
+      this.renderShop(renderTabs);
     }
   }
 
-  private renderPlaceholder(
-    title: string,
-    desc: string,
-    active: 'shop' | 'base',
-    renderTabs: (a: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => void
-  ): void {
-    const bg = createUINode('PlaceholderBg', 750, 1334, this.viewRoot, 0, 0);
+  private renderShop(renderTabs: (a: TabKey) => void): void {
+    const bg = createUINode('ShopBg', 750, 1334, this.viewRoot, 0, 0);
     drawRoundedBox(bg, 750, 1334, '#241B30', 255, 0);
-    createLabel(bg, title, 32, '#FFD54F', 0, 160, 620, 48);
-    createLabel(bg, desc, 22, '#E0E0E0', 0, 60, 620, 90);
-    if (active === 'shop') {
-      this.shopService.getProducts().forEach((prod, i) => {
-        createButton(bg, `${prod.name} (¥${prod.priceYuan}) - 预留`, 560, 74, '#311B92', async () => {
-          const r = await this.shopService.purchase(prod.id);
-          showToast(this.viewRoot, r.msg);
-        }, 0, -60 - i * 94, 20);
-      });
-    }
-    renderTabs(active);
+    createLabel(bg, '军需商店', 32, '#FFD54F', 0, 480, 620, 48);
+    createLabel(bg, '虚拟支付需企业主体 AppID 开通后上线，当前为预览', 20, '#B39DDB', 0, 430, 620, 32);
+
+    const chestLeft = this.dataMgr.adLeft('shop_free_chest');
+    createButton(bg, `每日免费宝箱 (广告 ${chestLeft}/1)`, 560, 80, chestLeft > 0 ? '#2E7D32' : '#546E7A', async () => {
+      const res = await this.adService.showRewardedAd('shop_free_chest');
+      if (res.completed) {
+        this.dataMgr.profile.gold += 500;
+        this.dataMgr.profile.forgeStone += 5;
+        this.dataMgr.save();
+        AudioManager.playSfx('sfx_coin');
+        showToast(this.viewRoot, '获得 铜钱×500 锻造石×5');
+        this.openTab('shop');
+      } else {
+        showToast(this.viewRoot, '今日已领取');
+      }
+    }, 0, 300, 22);
+
+    this.shopService.getProducts().forEach((prod, i) => {
+      createButton(bg, `${prod.name} (¥${prod.priceYuan})\n${prod.desc}`, 560, 100, '#311B92', async () => {
+        const r = await this.shopService.purchase(prod.id);
+        showToast(this.viewRoot, r.msg);
+      }, 0, 170 - i * 120, 19);
+    });
+    renderTabs('shop');
   }
 
-  private startBattle(stageId: number): void {
+  private startBattle(stageId: number, challenge = false): void {
     this.hallView = null;
     this.viewRoot.removeAllChildren();
-    this.battleView = new BattleView(
-      this.viewRoot,
-      stageId,
-      this.dataMgr,
-      this.adService,
-      () => this.openTab('hall')
-    );
+    const loading = createLabel(this.viewRoot, '军队集结中…', 28, '#FFD54F', 0, 0, 400, 40);
+    const ticketP = this.httpRepo ? this.httpRepo.startBattle(stageId, challenge) : Promise.resolve(null);
+    Promise.all([ArtAssetManager.loadBattle(), ticketP]).then(([, ticket]) => {
+      if (!this.node || !this.node.isValid) return;
+      loading.node.destroy();
+      this.battleView = new BattleView(
+        this.viewRoot,
+        stageId,
+        this.dataMgr,
+        this.adService,
+        () => this.onBattleExit(),
+        challenge,
+        ticket?.seed
+      );
+    });
+  }
+
+  private onBattleExit(): void {
+    this.openTab('hall');
+    if (!this.httpRepo) return;
+    this.httpRepo.submitBattle(this.dataMgr.lastBattleReport).then((r) => {
+      if (r.reason !== 'offline') {
+        // 以服务端结算后的存档为准
+        this.dataMgr = new PlayerDataManager(this.httpRepo!);
+        this.adService.setCounter(this.dataMgr);
+        if (!r.ok) showToast(this.viewRoot, '战报校验未通过，奖励以服务器为准');
+        this.refreshIfIdle();
+      }
+    });
   }
 }
 

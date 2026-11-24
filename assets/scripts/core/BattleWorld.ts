@@ -20,11 +20,17 @@ import {
 } from './configs.ts';
 import { calculateDamage, type AttackCalcParams } from './DamageCalc.ts';
 import { drawThreeRogueCards } from './RogueSystem.ts';
+import { createSeededRng, randomSeed, type RngFn } from './SeededRng.ts';
+import { SpatialGrid } from './SpatialGrid.ts';
+import { CHALLENGE_RULES, ELITE_AFFIXES, getWeaponConfig, type EliteAffixId } from './phase2Configs.ts';
 
 export const FIXED_DT = 1 / 30;
 export const WALL_Y = 265;
 export const LORD_POS: Vec2Point = { x: 375, y: 225 };
 export const LORD_RANGE = 560;
+export const TOWER_POSITIONS: Vec2Point[] = [{ x: 70, y: 250 }, { x: 680, y: 250 }];
+export const TOWER_RANGE = 430;
+export const BARRICADE_DEPTH = 130;
 
 export interface LordBattleBonus {
   baseAtk: number;
@@ -32,15 +38,45 @@ export interface LordBattleBonus {
   critRate: number;
   globalCritDmgBonus: number;
   gemEffects: Partial<Record<GemAffixType, number>>;
+  // 二期：城防基地 / 天赋 / 神兵（均为可选，缺省等同 MVP 行为）
+  expGainPct?: number;
+  wallReducePct?: number;
+  towerLevel?: number;
+  barricadeLevel?: number;
+  weaponId?: string;
 }
+
+export interface BattleWorldOptions {
+  seed?: number;
+  rng?: RngFn;
+  challenge?: boolean;
+}
+
+// 玩家对战斗逻辑产生影响的操作，按逻辑帧号记录，用于服务端回放校验
+export type BattleOp =
+  | { t: number; k: 'sel'; i: number }
+  | { t: number; k: 'ref' }
+  | { t: number; k: 'all' }
+  | { t: number; k: 'place'; x: number; y: number }
+  | { t: number; k: 'autoPlace' }
+  | { t: number; k: 'move'; h: string; x: number; y: number }
+  | { t: number; k: 'auto'; v: boolean }
+  | { t: number; k: 'revive' }
+  | { t: number; k: 'defeat' };
+
+type BattleOpBody = BattleOp extends infer O ? (O extends BattleOp ? Omit<O, 't'> : never) : never;
 
 export interface MonsterUnit {
   uid: number;
   config: MonsterConfig;
   x: number;
   y: number;
+  prevX: number;
+  prevY: number;
   hp: number;
   maxHp: number;
+  hitStopTimer: number;
+  elite?: EliteAffixId;
   pathIndex: number;
   waypointIndex: number;
   attackCooldown: number;
@@ -119,6 +155,8 @@ export interface BulletProj {
   sourceId: string;
   x: number;
   y: number;
+  prevX: number;
+  prevY: number;
   vx: number;
   vy: number;
   speed: number;
@@ -128,6 +166,7 @@ export interface BulletProj {
   color: string;
   fireSplash: boolean;
   thunderStun: boolean;
+  thunderChance?: number;
   knockbackPx: number;
   distanceBonus?: boolean;
   life: number;
@@ -185,25 +224,51 @@ export class BattleWorld {
   public bossSpawned = false;
   public bossKilled = false;
 
+  // 回放校验：种子 + 逻辑帧计数 + 操作日志
+  public readonly seed: number;
+  public readonly challenge: boolean;
+  public tickCount = 0;
+  public opLog: BattleOp[] = [];
+  private opDepth = 0;
+
+  // 开局赠送点将（区分"开局点将"与"升级三选一"弹窗标题）
+  public openingChoicesLeft = 0;
+  public currentChoiceIsOpening = false;
+
+  // 全都要：一局限 1 次，三张卡全部生效，多张新武将依次布阵
+  public takeAllLeft = 1;
+  private pendingHeroQueue: HeroConfig[] = [];
+
+  // 纯表现层信号（不参与逻辑，回放时被忽略）
+  public shakeRequest = 0;
+
   private waveSpawnState: { waveIndex: number; spawned: number; nextTime: number }[] = [];
   private nextUid = 1;
   private accumulator = 0;
-  private rng: () => number;
+  private rng: RngFn;
+  private grid = new SpatialGrid<MonsterUnit>(100);
+  private gridBuf: MonsterUnit[] = [];
+  private targetBuf: MonsterUnit[] = [];
+  private towerCooldowns: number[] = [0.8, 1.4];
 
   constructor(
     stageId: number,
     heroSaves: Record<string, HeroSaveData>,
     lordBonus: LordBattleBonus,
-    rng?: () => number
+    opts: BattleWorldOptions | RngFn = {}
   ) {
+    const o: BattleWorldOptions = typeof opts === 'function' ? { rng: opts } : opts;
     this.stage = getStageConfig(stageId);
     this.heroSaves = heroSaves;
     this.lordBonus = lordBonus;
-    this.rng = rng || Math.random;
+    this.challenge = !!o.challenge;
+    this.seed = o.seed ?? randomSeed();
+    this.rng = o.rng || createSeededRng(this.seed);
 
     this.maxWallHp = Math.round(lordBonus.maxWallHp);
     this.wallHp = this.maxWallHp;
     this.wallImmuneHits = Math.round(lordBonus.gemEffects.wall_immune_hits || 0);
+    this.wallDamageReduce = Math.min(0.4, (lordBonus.wallReducePct || 0) / 100);
     this.expNeeded = expNeededForLevel(1);
 
     this.generateRandomSuggestedSlots();
@@ -219,7 +284,43 @@ export class BattleWorld {
     // 每局天生赠送1次免费开局点将，若镶嵌玉佩开局宝石再额外叠加
     const startChoices = 1 + Math.round(lordBonus.gemEffects.start_rogue_choice || 0);
     this.pendingLevelUps += startChoices;
+    this.openingChoicesLeft = startChoices;
     this.triggerNextRogueChoice();
+  }
+
+  get renderAlpha(): number {
+    return Math.max(0, Math.min(1, this.accumulator / FIXED_DT));
+  }
+
+  private logOp(op: BattleOpBody): void {
+    if (this.opDepth === 0) this.opLog.push({ ...op, t: this.tickCount } as BattleOp);
+  }
+
+  private asOp<T>(op: BattleOpBody, fn: () => T): T {
+    this.logOp(op);
+    this.opDepth++;
+    try {
+      return fn();
+    } finally {
+      this.opDepth--;
+    }
+  }
+
+  private internal<T>(fn: () => T): T {
+    this.opDepth++;
+    try {
+      return fn();
+    } finally {
+      this.opDepth--;
+    }
+  }
+
+  public setAutoMode(v: boolean): void {
+    this.asOp({ k: 'auto', v }, () => {
+      this.autoMode = v;
+      if (v && this.phase === 'ROGUE_CHOICE') this.selectRogueCard(0);
+      else if (v && this.phase === 'DEPLOY_PICK') this.autoPlacePendingHero();
+    });
   }
 
   // 每局基于当前关卡曲折路径动态随机生成 7~8 个黄金推荐坑位（仍支持全图任意空地随意放置）
@@ -342,7 +443,10 @@ export class BattleWorld {
 
   public fixedTick(dt: number): void {
     if (this.phase !== 'PLAYING' && this.phase !== 'DEPLOY_PICK') return;
+    this.tickCount++;
     this.elapsed += dt;
+    for (const m of this.monsters) { m.prevX = m.x; m.prevY = m.y; }
+    for (const b of this.bullets) { b.prevX = b.x; b.prevY = b.y; }
 
     if (this.swapCooldown > 0) this.swapCooldown = Math.max(0, this.swapCooldown - dt);
     if (this.lordAttackAnimTimer > 0) this.lordAttackAnimTimer = Math.max(0, this.lordAttackAnimTimer - dt);
@@ -353,11 +457,13 @@ export class BattleWorld {
       else this.lockedHeroes.set(hid, rem - dt);
     }
 
-    // 2. 刷怪波次
+    // 2. 刷怪波次，并重建空间网格供本帧索敌/碰撞使用
     this.updateWaves();
+    this.rebuildGrid();
 
-    // 3. 主公自动攻击（仅防守防线中下半场）
+    // 3. 主公自动攻击（仅防守防线中下半场）+ 城防箭塔
     this.updateLord(dt);
+    this.updateTowers(dt);
 
     // 4. 武将自动攻击
     this.updateHeroes(dt);
@@ -387,19 +493,46 @@ export class BattleWorld {
     }
   }
 
-  public spawnMonster(monsterId: string, pathIndex: number, hpScale = 1, customPos?: Vec2Point): MonsterUnit | null {
+  private rebuildGrid(): void {
+    this.grid.clear();
+    for (const m of this.monsters) {
+      if (!m.dead) this.grid.insert(m);
+    }
+  }
+
+  // 网格候选 + 余量（同帧内击退/推风会让坐标小幅偏离建网时的位置）
+  private nearbyMonsters(x: number, y: number, r: number): MonsterUnit[] {
+    return this.grid.query(x, y, r + 90, this.gridBuf);
+  }
+
+  public spawnMonster(monsterId: string, pathIndex: number, hpScale = 1, customPos?: Vec2Point, allowElite = true): MonsterUnit | null {
     const cfg = MONSTER_CONFIGS[monsterId];
     if (!cfg) return null;
     const path = this.stage.paths[pathIndex % this.stage.paths.length];
     const start = customPos || path[0];
-    const maxHp = Math.round(cfg.baseHp * hpScale);
+    let elite: EliteAffixId | undefined;
+    let scale = hpScale;
+    if (this.challenge) {
+      scale *= CHALLENGE_RULES.hpScale;
+      if (cfg.isBoss) elite = CHALLENGE_RULES.bossAffix;
+      else if (allowElite && this.rng() < CHALLENGE_RULES.eliteChance) {
+        const ids = Object.keys(ELITE_AFFIXES) as EliteAffixId[];
+        elite = ids[Math.floor(this.rng() * ids.length)];
+      }
+    }
+    const maxHp = Math.round(cfg.baseHp * scale);
+    const x0 = start.x + (this.rng() - 0.5) * 14;
     const m: MonsterUnit = {
       uid: this.nextUid++,
       config: cfg,
-      x: start.x + (this.rng() - 0.5) * 14,
+      x: x0,
       y: start.y,
+      prevX: x0,
+      prevY: start.y,
       hp: maxHp,
       maxHp,
+      hitStopTimer: 0,
+      elite,
       pathIndex: pathIndex % this.stage.paths.length,
       waypointIndex: 1,
       attackCooldown: 0.6,
@@ -450,11 +583,13 @@ export class BattleWorld {
     this.lordCooldown = interval;
     this.lordAttackAnimTimer = 0.16;
 
-    const multiCount = 1 + (this.lordSkillLevels['LS_MULTI'] || 0) + Math.round(this.lordBonus.gemEffects.lord_multishot || 0);
-    const pierce = (this.lordSkillLevels['LS_PIERCE'] || 0) + Math.round(this.lordBonus.gemEffects.lord_pierce || 0);
+    const weapon = getWeaponConfig(this.lordBonus.weaponId);
+    const multiCount = 1 + (this.lordSkillLevels['LS_MULTI'] || 0) + Math.round(this.lordBonus.gemEffects.lord_multishot || 0) + weapon.multishot;
+    const pierce = (this.lordSkillLevels['LS_PIERCE'] || 0) + Math.round(this.lordBonus.gemEffects.lord_pierce || 0) + weapon.pierce;
     const critLv = this.lordSkillLevels['LS_CRIT'] || 0;
     const fireLv = this.lordSkillLevels['LS_FIRE'] || 0;
     const thunderLv = this.lordSkillLevels['LS_THUNDER'] || 0;
+    const thunderChance = Math.min(0.6, (thunderLv > 0 ? 0.3 : 0) + weapon.thunderChance);
 
     const baseAngle = Math.atan2(target.y - LORD_POS.y, target.x - LORD_POS.x);
     const spread = 0.11;
@@ -468,14 +603,17 @@ export class BattleWorld {
         sourceId: 'LORD',
         x: LORD_POS.x,
         y: LORD_POS.y + 18,
+        prevX: LORD_POS.x,
+        prevY: LORD_POS.y + 18,
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
         speed: spd,
         pierceLeft: pierce,
         hitUids: new Set(),
-        color: fireLv > 0 ? '#FF7043' : thunderLv > 0 ? '#9575CD' : '#FFEE58',
+        color: fireLv > 0 ? '#FF7043' : thunderLv > 0 ? '#9575CD' : weapon.bulletColor,
         fireSplash: fireLv > 0,
-        thunderStun: thunderLv > 0,
+        thunderStun: thunderChance > 0,
+        thunderChance,
         knockbackPx: 0,
         life: 1.0,
         atkParams: {
@@ -487,12 +625,37 @@ export class BattleWorld {
           distanceDmgPct: 0,
           bossDmgPct: (this.lordBonus.gemEffects.boss_dmg_pct || 0) / 100,
           armorPenetration: 0.22 + pierce * 0.08,
-          critRate: this.lordBonus.critRate + critLv * 0.12,
+          critRate: this.lordBonus.critRate + critLv * 0.12 + weapon.critRate,
           critDmgBonus: this.lordBonus.globalCritDmgBonus + critLv * 0.30,
           dimDistance: 'ranged',
           dimElement: fireLv > 0 ? 'fire' : 'physical',
           canHitAir: true,
           rng: this.rng,
+        },
+      });
+    }
+  }
+
+  // 城防基地箭塔：城墙两端自动射击，射程覆盖墙前防线
+  private updateTowers(dt: number): void {
+    const lv = this.lordBonus.towerLevel || 0;
+    if (lv <= 0) return;
+    for (let i = 0; i < TOWER_POSITIONS.length; i++) {
+      this.towerCooldowns[i] -= dt;
+      if (this.towerCooldowns[i] > 0) continue;
+      const p = TOWER_POSITIONS[i];
+      const target = this.findNearestTarget(p.x, p.y, TOWER_RANGE, true);
+      if (!target) continue;
+      this.towerCooldowns[i] = 1.3;
+      const ang = Math.atan2(target.y - p.y, target.x - p.x);
+      this.bullets.push({
+        id: this.nextUid++, sourceId: 'TOWER', x: p.x, y: p.y, prevX: p.x, prevY: p.y,
+        vx: Math.cos(ang) * 820, vy: Math.sin(ang) * 820, speed: 820,
+        pierceLeft: 0, hitUids: new Set(), color: '#A1887F', fireSplash: false, thunderStun: false, knockbackPx: 0, life: 1.0,
+        atkParams: {
+          baseAtk: this.lordBonus.baseAtk, skillMultiplier: 0.2 * lv, outLevelBonus: 0, globalDmgPct: 0, elementDmgPct: 0,
+          distanceDmgPct: 0, bossDmgPct: 0, armorPenetration: 0.15, critRate: this.lordBonus.critRate,
+          critDmgBonus: this.lordBonus.globalCritDmgBonus, dimDistance: 'ranged', dimElement: 'physical', canHitAir: true, rng: this.rng,
         },
       });
     }
@@ -613,7 +776,7 @@ export class BattleWorld {
       for (let i = 0; i < arrows; i++) {
         const ang = baseAng + (i - (arrows - 1) / 2) * 0.1;
         this.bullets.push({
-          id: this.nextUid++, sourceId: id, x: hero.x, y: hero.y,
+          id: this.nextUid++, sourceId: id, x: hero.x, y: hero.y, prevX: hero.x, prevY: hero.y,
           vx: Math.cos(ang) * 900, vy: Math.sin(ang) * 900, speed: 900,
           pierceLeft: pierce, hitUids: new Set(), atkParams: { ...atk },
           color: '#FFD54F', fireSplash: !!af['H02_A4'], thunderStun: false, knockbackPx: 0, distanceBonus: true, life: 1.5,
@@ -781,7 +944,7 @@ export class BattleWorld {
       for (let i = 0; i < shots; i++) {
         const ang = baseAng + (i - (shots - 1) / 2) * 0.09;
         this.bullets.push({
-          id: this.nextUid++, sourceId: id, x: hero.x, y: hero.y,
+          id: this.nextUid++, sourceId: id, x: hero.x, y: hero.y, prevX: hero.x, prevY: hero.y,
           vx: Math.cos(ang) * 820, vy: Math.sin(ang) * 820, speed: 820,
           pierceLeft: 0, hitUids: new Set(), atkParams: { ...atk },
           color: '#FFB74D', fireSplash: false, thunderStun: false, knockbackPx: af['H11_A3'] ? 20 : 0, life: 1.3,
@@ -828,19 +991,19 @@ export class BattleWorld {
       }
 
       let removed = false;
-      for (const m of this.monsters) {
+      for (const m of this.nearbyMonsters(b.x, b.y, 60)) {
         if (m.dead || b.hitUids.has(m.uid)) continue;
         if (Math.hypot(m.x - b.x, m.y - b.y) <= m.config.radius + 12) {
           b.hitUids.add(m.uid);
           const atk = b.distanceBonus
             ? { ...b.atkParams, globalDmgPct: b.atkParams.globalDmgPct + Math.min(0.25, Math.hypot(b.x - LORD_POS.x, b.y - LORD_POS.y) / 2000) }
             : b.atkParams;
-          this.applyHit(b.sourceId, m, atk);
+          this.applyHit(b.sourceId, m, atk, b.x - b.vx * 0.02, b.y - b.vy * 0.02);
 
           if (b.knockbackPx > 0 && !m.config.isBoss) {
             m.y = Math.min(1140, m.y + b.knockbackPx);
           }
-          if (b.thunderStun && this.rng() < 0.3) {
+          if (b.thunderStun && this.rng() < (b.thunderChance ?? 0.3)) {
             m.stunTimer = Math.max(m.stunTimer, 0.5);
           }
           if (b.fireSplash) {
@@ -964,8 +1127,17 @@ export class BattleWorld {
         }
       }
 
+      if (m.elite === 'regen' && m.hp > 0) {
+        m.hp = Math.min(m.maxHp, m.hp + m.maxHp * 0.015 * dt * (m.poisonAntiHeal ? 0.1 : 1));
+      }
+
       if (m.config.isBoss) {
         this.updateBossBehavior(m, dt);
+      }
+
+      if (m.hitStopTimer > 0) {
+        m.hitStopTimer = Math.max(0, m.hitStopTimer - dt);
+        continue;
       }
 
       if (m.freezeTimer > 0 || m.stunTimer > 0 || m.charmTimer > 0) {
@@ -979,7 +1151,7 @@ export class BattleWorld {
         m.attackCooldown -= dt;
         if (m.attackCooldown <= 0) {
           m.attackCooldown = 1.2;
-          this.damageWall(m.config.wallDmg);
+          this.damageWall(m.config.wallDmg * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1));
         }
         continue;
       }
@@ -989,7 +1161,9 @@ export class BattleWorld {
       const dx = wp.x - m.x;
       const dy = wp.y - m.y;
       const dist = Math.hypot(dx, dy);
-      const speedMult = (m.enraged ? 1.45 : 1.0) * (1 - Math.min(0.65, m.slowRatio));
+      const barricadeLv = this.lordBonus.barricadeLevel || 0;
+      const barricadeSlow = barricadeLv > 0 && m.config.space === 'ground' && m.y <= WALL_Y + BARRICADE_DEPTH ? 0.06 * barricadeLv : 0;
+      const speedMult = (m.enraged ? 1.45 : 1.0) * (m.elite === 'swift' ? 1.3 : 1.0) * (1 - Math.min(0.65, m.slowRatio + barricadeSlow));
       const moveDist = m.config.speed * speedMult * dt;
 
       if (dist <= moveDist) {
@@ -1050,13 +1224,21 @@ export class BattleWorld {
     }
     const dmg = Math.max(1, Math.round(raw * (1 - this.wallDamageReduce)));
     this.wallHp = Math.max(0, this.wallHp - dmg);
+    this.shakeRequest = Math.max(this.shakeRequest, dmg >= 150 ? 7 : 3);
   }
 
-  private applyHit(sourceId: string, m: MonsterUnit, atk: AttackCalcParams) {
+  private sourcePos(sourceId: string): Vec2Point | null {
+    if (sourceId === 'LORD') return LORD_POS;
+    const h = this.deployedHeroes.get(sourceId);
+    return h ? { x: h.x, y: h.y } : null;
+  }
+
+  // fx/fy：攻击来向（用于火花朝向与击退方向），缺省取攻击者站位
+  private applyHit(sourceId: string, m: MonsterUnit, atk: AttackCalcParams, fx?: number, fy?: number) {
     const res = calculateDamage(atk, {
       config: m.config,
       shredPhysical: m.shredPhysical,
-      shredAll: m.shredAll,
+      shredAll: m.shredAll - (m.elite === 'armored' ? 0.15 : 0),
       magicVuln: m.magicVuln,
       allVuln: m.allVuln,
     });
@@ -1070,6 +1252,36 @@ export class BattleWorld {
     m.hitFlashTimer = 0.1;
     this.damageStats[sourceId] = (this.damageStats[sourceId] || 0) + res.damage;
 
+    // 打击感：按单位顿帧（不做全局减速）+ 暴击分级击退 + 沿来向迸发火花
+    const heavy = res.isCrit || atk.dimDistance === 'melee';
+    if (heavy) {
+      m.hitStopTimer = Math.max(m.hitStopTimer, res.isCrit ? 0.1 : 0.05);
+      let sx = fx;
+      let sy = fy;
+      if (sx === undefined || sy === undefined) {
+        const p = this.sourcePos(sourceId);
+        sx = p ? p.x : m.x;
+        sy = p ? p.y : m.y - 1;
+      }
+      const dx = m.x - sx;
+      const dy = m.y - sy;
+      const len = Math.hypot(dx, dy) || 1;
+      if (res.isCrit && !m.config.isBoss && m.config.space === 'ground') {
+        const push = atk.dimDistance === 'melee' ? 10 : 5;
+        m.x = Math.max(40, Math.min(710, m.x + (dx / len) * push));
+        m.y = Math.min(1140, m.y + Math.abs(dy / len) * push);
+      }
+      if (this.vfxEvents.length < 120) {
+        const r = m.config.radius;
+        this.vfxEvents.push({
+          type: 'hit_spark', x: m.x - (dx / len) * r * 0.6, y: m.y - (dy / len) * r * 0.6,
+          tx: m.x + (dx / len) * 40, ty: m.y + (dy / len) * 40,
+          color: res.isCrit ? '#FFD54F' : '#FFFFFF', duration: res.isCrit ? 0.22 : 0.14,
+        });
+      }
+      if (res.isCrit && m.config.isBoss) this.shakeRequest = Math.max(this.shakeRequest, 5);
+    }
+
     let color = '#FFFFFF';
     let scale = 0.85;
     let text = `${res.damage}`;
@@ -1077,8 +1289,10 @@ export class BattleWorld {
     else if (res.tag === 'weak') { color = '#FF8A65'; scale = 1.05; text = `${res.damage}!`; }
     else if (res.tag === 'resist') { color = '#90A4AE'; scale = 0.75; text = `${res.damage}(抗)`; }
 
+    // 先消耗随机数再判断上限：飘字队列长度受表现层消费影响，不能让它改变逻辑随机序列
+    const jitter = (this.rng() - 0.5) * 18;
     if (this.floatTexts.length < 40) {
-      this.floatTexts.push({ x: m.x + (this.rng() - 0.5) * 18, y: m.y + 18, text, color, scale });
+      this.floatTexts.push({ x: m.x + jitter, y: m.y + 18, text, color, scale });
     }
     return res;
   }
@@ -1095,6 +1309,12 @@ export class BattleWorld {
         }
         this.gainBattleExp(m.config.exp);
         this.monsters.splice(i, 1);
+        if (m.elite === 'split') {
+          for (let k = 0; k < 2; k++) {
+            const child = this.spawnMonster('M_INFANTRY', m.pathIndex, 0.4, { x: m.x + (k ? 18 : -18), y: m.y }, false);
+            if (child) child.waypointIndex = m.waypointIndex;
+          }
+        }
       }
     }
 
@@ -1117,7 +1337,7 @@ export class BattleWorld {
   }
 
   private gainBattleExp(exp: number): void {
-    this.battleExp += exp;
+    this.battleExp += Math.round(exp * (1 + (this.lordBonus.expGainPct || 0) / 100));
     while (this.battleExp >= this.expNeeded) {
       this.battleExp -= this.expNeeded;
       this.battleLevel++;
@@ -1132,6 +1352,8 @@ export class BattleWorld {
   public triggerNextRogueChoice(): void {
     if (this.pendingLevelUps <= 0) return;
     this.pendingLevelUps--;
+    this.currentChoiceIsOpening = this.openingChoicesLeft > 0;
+    if (this.openingChoicesLeft > 0) this.openingChoicesLeft--;
     const deployedIds = Array.from(this.deployedHeroes.keys());
     const affixStacks: Record<string, Record<string, number>> = {};
     for (const h of this.deployedHeroes.values()) {
@@ -1161,11 +1383,15 @@ export class BattleWorld {
     this.timeScale = 0;
 
     if (this.autoMode) {
-      this.selectRogueCard(0);
+      this.internal(() => this.selectRogueCard(0));
     }
   }
 
   public refreshRogueCards(): boolean {
+    return this.asOp({ k: 'ref' }, () => this.doRefreshRogueCards());
+  }
+
+  private doRefreshRogueCards(): boolean {
     if (this.phase !== 'ROGUE_CHOICE' || this.adRefreshLeft <= 0) return false;
     this.adRefreshLeft--;
     const deployedIds = Array.from(this.deployedHeroes.keys());
@@ -1188,6 +1414,10 @@ export class BattleWorld {
   }
 
   public selectRogueCard(index: number): void {
+    this.asOp({ k: 'sel', i: index }, () => this.doSelectRogueCard(index));
+  }
+
+  private doSelectRogueCard(index: number): void {
     if (this.phase !== 'ROGUE_CHOICE') return;
     const card = this.pendingRogueCards[index];
     if (!card) return;
@@ -1196,15 +1426,51 @@ export class BattleWorld {
     if (card.type === 'NEW_HERO' && card.heroId) {
       const cfg = getHeroConfig(card.heroId);
       if (cfg) {
-        this.pendingHeroToPlace = cfg;
-        this.phase = 'DEPLOY_PICK';
-        this.timeScale = 0.05;
-        if (this.autoMode) {
-          this.autoPlacePendingHero();
-        }
+        this.enterDeployPick(cfg);
         return;
       }
-    } else if (card.type === 'LORD_SKILL' && card.lordSkillId) {
+    }
+    this.applyNonHeroCard(card);
+    this.resumeOrNextChoice();
+  }
+
+  // 全都要（激励视频）：三张卡全部生效，其中的新武将按顺序依次布阵
+  public takeAllRogueCards(): boolean {
+    return this.asOp({ k: 'all' }, () => {
+      if (this.phase !== 'ROGUE_CHOICE' || this.takeAllLeft <= 0 || this.pendingRogueCards.length === 0) return false;
+      this.takeAllLeft--;
+      const cards = this.pendingRogueCards;
+      this.pendingRogueCards = [];
+      const heroes: HeroConfig[] = [];
+      for (const card of cards) {
+        if (card.type === 'NEW_HERO' && card.heroId) {
+          const cfg = getHeroConfig(card.heroId);
+          if (cfg && this.deployedHeroes.size + heroes.length < this.maxHeroes) heroes.push(cfg);
+        } else {
+          this.applyNonHeroCard(card);
+        }
+      }
+      if (heroes.length > 0) {
+        this.pendingHeroQueue.push(...heroes.slice(1));
+        this.enterDeployPick(heroes[0]);
+      } else {
+        this.resumeOrNextChoice();
+      }
+      return true;
+    });
+  }
+
+  private enterDeployPick(cfg: HeroConfig): void {
+    this.pendingHeroToPlace = cfg;
+    this.phase = 'DEPLOY_PICK';
+    this.timeScale = 0.05;
+    if (this.autoMode) {
+      this.internal(() => this.autoPlacePendingHero());
+    }
+  }
+
+  private applyNonHeroCard(card: RogueCard): void {
+    if (card.type === 'LORD_SKILL' && card.lordSkillId) {
       this.lordSkillLevels[card.lordSkillId] = (this.lordSkillLevels[card.lordSkillId] || 0) + 1;
       if (card.lordSkillId === 'LS_WALL') {
         this.wallHp = Math.min(this.maxWallHp, this.wallHp + Math.round(this.maxWallHp * 0.2));
@@ -1222,12 +1488,14 @@ export class BattleWorld {
         }
       }
     }
-
-    this.resumeOrNextChoice();
   }
 
   // 在任意合法坐标放置待部署武将（若靠近空闲推荐黄金坑位则轻吸附）
   public placePendingHeroAt(x: number, y: number): { ok: boolean; reason?: string; snappedSlotId?: number } {
+    return this.asOp({ k: 'place', x: Math.round(x), y: Math.round(y) }, () => this.doPlacePendingHeroAt(Math.round(x), Math.round(y)));
+  }
+
+  private doPlacePendingHeroAt(x: number, y: number): { ok: boolean; reason?: string; snappedSlotId?: number } {
     if (this.phase !== 'DEPLOY_PICK' || !this.pendingHeroToPlace) {
       return { ok: false, reason: '当前不在选位状态' };
     }
@@ -1280,6 +1548,10 @@ export class BattleWorld {
   }
 
   public autoPlacePendingHero(): boolean {
+    return this.asOp({ k: 'autoPlace' }, () => this.doAutoPlacePendingHero());
+  }
+
+  private doAutoPlacePendingHero(): boolean {
     if (this.phase !== 'DEPLOY_PICK' || !this.pendingHeroToPlace) return false;
     const cfg = this.pendingHeroToPlace;
     const emptySlots = this.suggestedSlots.filter(
@@ -1308,6 +1580,12 @@ export class BattleWorld {
 
   // 战斗中任意自由拖拽换位（支持移动到任意空地，或拖到另一名武将身上互换位置）
   public moveHeroTo(heroId: string, x: number, y: number): { ok: boolean; reason?: string; swapped?: boolean } {
+    const rx = Math.round(x);
+    const ry = Math.round(y);
+    return this.asOp({ k: 'move', h: heroId, x: rx, y: ry }, () => this.doMoveHeroTo(heroId, rx, ry));
+  }
+
+  private doMoveHeroTo(heroId: string, x: number, y: number): { ok: boolean; reason?: string; swapped?: boolean } {
     if (this.swapCooldown > 0) {
       return { ok: false, reason: '换位冷却中(1.5秒)' };
     }
@@ -1361,21 +1639,25 @@ export class BattleWorld {
   }
 
   public reviveWall(): void {
-    if (this.phase !== 'REVIVE_ASK' || this.revivedOnce) return;
-    this.revivedOnce = true;
-    this.wallHp = this.maxWallHp;
-    for (const m of this.monsters) {
-      if (!m.dead && m.y < 600) m.y = Math.min(1100, m.y + 240);
-    }
-    this.phase = 'PLAYING';
-    this.timeScale = this.userSpeed;
+    this.asOp({ k: 'revive' }, () => {
+      if (this.phase !== 'REVIVE_ASK' || this.revivedOnce) return;
+      this.revivedOnce = true;
+      this.wallHp = this.maxWallHp;
+      for (const m of this.monsters) {
+        if (!m.dead && m.y < 600) m.y = Math.min(1100, m.y + 240);
+      }
+      this.phase = 'PLAYING';
+      this.timeScale = this.userSpeed;
+    });
   }
 
   public confirmDefeat(): void {
-    if (this.phase === 'REVIVE_ASK') {
-      this.phase = 'DEFEAT';
-      this.timeScale = 0;
-    }
+    this.asOp({ k: 'defeat' }, () => {
+      if (this.phase === 'REVIVE_ASK') {
+        this.phase = 'DEFEAT';
+        this.timeScale = 0;
+      }
+    });
   }
 
   public getStars(): number {
@@ -1387,24 +1669,31 @@ export class BattleWorld {
 
   public calcSettleReward(doubleReward = false): BattleReward {
     const win = this.phase === 'VICTORY';
-    const mult = doubleReward ? 2 : 1;
+    const mult = (doubleReward ? 2 : 1) * (this.challenge ? CHALLENGE_RULES.rewardMult : 1);
     const s = this.stage.stageId;
     const baseGold = win ? 220 + s * 60 : Math.max(40, this.kills * 4);
     const shardHero = HERO_CONFIGS[(s + Math.floor(this.rng() * 3)) % HERO_CONFIGS.length].id;
 
     return {
-      gold: baseGold * mult,
-      diamond: win ? (this.getStars() === 3 ? 30 : 15) * mult : 0,
-      forgeStone: (win ? 4 + s : 1) * mult,
-      refineStone: (win ? 2 : 0) * mult,
-      exp: (win ? 45 + s * 10 : 15) * mult,
+      gold: Math.round(baseGold * mult),
+      diamond: Math.round((win ? (this.getStars() === 3 ? 30 : 15) : 0) * mult),
+      forgeStone: Math.round((win ? 4 + s : 1) * mult),
+      refineStone: Math.round((win ? 2 : 0) * mult),
+      exp: Math.round((win ? 45 + s * 10 : 15) * mult),
       shardHeroId: shardHero,
-      shardCount: (win ? 4 : 1) * mult,
+      shardCount: Math.round((win ? 4 : 1) * mult),
       newEquipTier: win && this.rng() < 0.65 ? Math.min(6, Math.ceil(s / 2)) : undefined,
     };
   }
 
   private resumeOrNextChoice(): void {
+    while (this.pendingHeroQueue.length > 0) {
+      const next = this.pendingHeroQueue.shift()!;
+      if (!this.deployedHeroes.has(next.id) && this.deployedHeroes.size < this.maxHeroes) {
+        this.enterDeployPick(next);
+        return;
+      }
+    }
     if (this.pendingLevelUps > 0) {
       this.triggerNextRogueChoice();
     } else {
@@ -1416,7 +1705,7 @@ export class BattleWorld {
   private findNearestTarget(x: number, y: number, range: number, canHitAir: boolean, exclude?: Set<number>): MonsterUnit | null {
     let best: MonsterUnit | null = null;
     let bestScore = Infinity;
-    for (const m of this.monsters) {
+    for (const m of this.grid.query(x, y, range + 90, this.targetBuf)) {
       if (m.dead) continue;
       if (exclude && exclude.has(m.uid)) continue;
       if (m.config.space === 'air' && !canHitAir) continue;
@@ -1434,7 +1723,7 @@ export class BattleWorld {
 
   private findTopTargets(x: number, y: number, range: number, canHitAir: boolean, count: number): MonsterUnit[] {
     const list: { m: MonsterUnit; score: number }[] = [];
-    for (const m of this.monsters) {
+    for (const m of this.grid.query(x, y, range + 90, this.targetBuf)) {
       if (m.dead) continue;
       if (m.config.space === 'air' && !canHitAir) continue;
       const d = Math.hypot(m.x - x, m.y - y);
