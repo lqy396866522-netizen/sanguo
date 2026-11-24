@@ -1,4 +1,4 @@
-import { assetManager, AssetManager, AudioClip, AudioSource, Node, sys } from 'cc';
+import { assetManager, AssetManager, AudioClip, AudioSource, game, Game, Node, sys } from 'cc';
 
 // 音频统一出口：BGM 交叉淡入淡出 + 音效同类节流与全局并发上限 + 开关持久化
 const AUDIO_BUNDLE = 'audio';
@@ -16,6 +16,8 @@ const SFX_KEYS: SfxKey[] = [
   'sfx_victory', 'sfx_defeat', 'sfx_explosion', 'sfx_heal', 'sfx_deploy', 'sfx_coin',
 ];
 const BGM_KEYS: BgmKey[] = ['bgm_hall', 'bgm_battle', 'bgm_boss'];
+// 高频音效的额外变体文件（<key>_2.mp3 ...），播放时随机挑选避免机械重复
+const SFX_VARIANTS: Partial<Record<SfxKey, number>> = { sfx_crossbow: 2, sfx_hit: 2 };
 
 // 同一音效的最短重复间隔（秒），高频打击音避免糊成一片
 const SFX_MIN_GAP: Partial<Record<SfxKey, number>> = {
@@ -65,6 +67,10 @@ class AudioManagerImpl {
     } catch {
       // ignore
     }
+    game.on(Game.EVENT_HIDE, () => this.bgmA?.pause());
+    game.on(Game.EVENT_SHOW, () => {
+      if (this.bgmOn && this.currentBgm) this.bgmA?.play();
+    });
     this.load();
   }
 
@@ -77,6 +83,9 @@ class AudioManagerImpl {
             return;
           }
           const keys: string[] = [...SFX_KEYS, ...BGM_KEYS];
+          for (const [k, n] of Object.entries(SFX_VARIANTS)) {
+            for (let i = 2; i <= (n ?? 1); i++) keys.push(`${k}_${i}`);
+          }
           let left = keys.length;
           for (const k of keys) {
             bundle.load(k, AudioClip, (e, clip) => {
@@ -138,7 +147,9 @@ class AudioManagerImpl {
 
   public playSfx(key: SfxKey, volumeScale = 1): void {
     if (!this.sfxOn || !this.sfxSrc) return;
-    const clip = this.clips.get(key);
+    const variants = SFX_VARIANTS[key] ?? 1;
+    const pick = variants > 1 ? Math.floor(Math.random() * variants) + 1 : 1;
+    const clip = (pick > 1 && this.clips.get(`${key}_${pick}`)) || this.clips.get(key);
     if (!clip) return;
     const gap = SFX_MIN_GAP[key] ?? 0.05;
     const last = this.lastPlay.get(key) ?? -999;

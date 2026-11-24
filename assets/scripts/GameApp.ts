@@ -101,10 +101,7 @@ export class GameApp extends Component {
           126,
           84,
           isAct ? '#FFB300' : '#2C1F3D',
-          () => {
-            AudioManager.playSfx('sfx_click');
-            this.openTab(t.key);
-          },
+          () => this.openTab(t.key),
           x,
           4,
           isAct ? 22 : 19,

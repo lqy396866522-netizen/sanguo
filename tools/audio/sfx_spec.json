@@ -1,0 +1,22 @@
+{
+  "sfx_crossbow": { "max": 0.5, "fade": 0.2, "peak": -3 },
+  "sfx_crossbow_2": { "max": 0.5, "fade": 0.2, "peak": -3 },
+  "sfx_spear": { "max": 0.5, "fade": 0.2, "peak": -3 },
+  "sfx_slash": { "max": 0.6, "fade": 0.25, "peak": -3 },
+  "sfx_fire": { "max": 1.0, "fade": 0.4, "peak": -3 },
+  "sfx_thunder": { "max": 1.2, "fade": 0.5, "peak": -2 },
+  "sfx_ice": { "max": 1.0, "fade": 0.4, "peak": -3 },
+  "sfx_hit": { "max": 0.35, "fade": 0.15, "peak": -2 },
+  "sfx_hit_2": { "max": 0.35, "fade": 0.15, "peak": -2 },
+  "sfx_crit": { "max": 0.6, "fade": 0.3, "peak": -1 },
+  "sfx_wall_hit": { "max": 0.6, "fade": 0.3, "peak": -2, "lowpass": 3000 },
+  "sfx_levelup": { "max": 1.5, "fade": 0.4, "peak": -4 },
+  "sfx_card": { "max": 0.4, "fade": 0.1, "peak": -5 },
+  "sfx_click": { "max": 0.2, "fade": 0.05, "peak": -6 },
+  "sfx_victory": { "max": 3.0, "fade": 0.8, "peak": -3 },
+  "sfx_defeat": { "max": 2.5, "fade": 0.8, "peak": -3 },
+  "sfx_explosion": { "max": 1.5, "fade": 0.6, "peak": -1 },
+  "sfx_heal": { "max": 1.5, "fade": 0.6, "peak": -4 },
+  "sfx_deploy": { "max": 1.2, "fade": 0.4, "peak": -3 },
+  "sfx_coin": { "max": 0.8, "fade": 0.3, "peak": -4 }
+}

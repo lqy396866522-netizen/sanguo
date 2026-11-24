@@ -10,6 +10,7 @@ import {
   Vec3,
   Layers,
 } from 'cc';
+import { AudioManager } from './AudioManager';
 
 export function hexToColor(hex: string, alpha = 255): Color {
   const clean = hex.replace('#', '');
@@ -113,7 +114,10 @@ export function createButton(
   const btn = node.addComponent(Button);
   btn.transition = Button.Transition.SCALE;
   btn.zoomScale = 0.94;
-  node.on(Button.EventType.CLICK, onClick);
+  node.on(Button.EventType.CLICK, () => {
+    AudioManager.playSfx('sfx_click');
+    onClick();
+  });
   const label = createLabel(node, text, fontSize, textColor, 0, 0, w - 16, h - 8);
   return { node, label };
 }
