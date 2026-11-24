@@ -20,7 +20,7 @@ import {
 } from '../core/BattleWorld.ts';
 import { ELITE_AFFIXES } from '../core/phase2Configs.ts';
 import { getHeroConfig, MONSTER_CONFIGS } from '../core/configs.ts';
-import type { BattleVfxEvent } from '../core/types.ts';
+import type { BattleReport, BattleVfxEvent } from '../core/types.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
 import type { IAdService } from '../sdk/MockServices.ts';
 import {
@@ -1285,7 +1285,7 @@ export class BattleView {
     const win = this.world.phase === 'VICTORY';
     const stars = this.world.getStars();
     const reward = this.world.calcSettleReward(false);
-    const report = {
+    const report: BattleReport = {
       stageId: this.world.stage.stageId,
       challenge: this.world.challenge,
       seed: this.world.seed,
@@ -1322,6 +1322,7 @@ export class BattleView {
       const res = await this.adService.showRewardedAd('battle_double_reward');
       if (res.completed) {
         doubled = true;
+        report.doubled = true;
         this.dataMgr.grantExtraReward(reward);
         AudioManager.playSfx('sfx_coin');
         showToast(this.root, '已额外发放双倍资源奖励!');

@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  openid    String   @unique @db.VarChar(64)
+  createdAt DateTime @default(now())
+  profile   Profile?
+  battles   Battle[]
+  orders    PayOrder[]
+}
+
+// 存档整体以 JSON 存储（与客户端 PlayerProfile 同构），version 做乐观锁
+model Profile {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id])
+  data      Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+model Battle {
+  id        String    @id
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  stageId   Int
+  challenge Boolean
+  seed      BigInt
+  snapshot  Json
+  status    String    @db.VarChar(16)
+  result    Json?
+  createdAt DateTime  @default(now())
+  settledAt DateTime?
+
+  @@index([userId, status])
+}
+
+model PayOrder {
+  id        String    @id
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  productId String    @db.VarChar(32)
+  priceFen  Int
+  diamonds  Int
+  status    String    @db.VarChar(16)
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  @@index([userId])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  kind      String   @db.VarChar(32)
+  detail    Json
+  createdAt DateTime @default(now())
+
+  @@index([userId, kind])
+}

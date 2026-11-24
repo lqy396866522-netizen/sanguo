@@ -1,0 +1,32 @@
+{
+  "name": "sanguo-tafang-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "三国塔防后端：NestJS + Prisma(MySQL) + Redis，战斗回放校验复用客户端 core 逻辑",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server/src/main.js",
+    "dev": "npm run build && node dist/server/src/main.js",
+    "test": "npm run build && node --test test/e2e.test.mjs",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@prisma/client": "^6.0.0",
+    "ioredis": "^5.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^22.10.0",
+    "prisma": "^6.0.0",
+    "typescript": "~5.7.2"
+  }
+}

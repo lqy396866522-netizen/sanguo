@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "rootDir": "..",
+    "outDir": "dist",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "rewriteRelativeImportExtensions": true,
+    "strict": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "lib": ["ES2021"],
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "../assets/scripts/core/**/*.ts",
+    "../assets/scripts/data/PlayerDataManager.ts",
+    "../assets/scripts/data/IDataRepository.ts"
+  ]
+}

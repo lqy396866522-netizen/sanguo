@@ -161,6 +161,7 @@ export class GameApp extends Component {
     this.hallView = null;
     this.viewRoot.removeAllChildren();
     const loading = createLabel(this.viewRoot, '军队集结中…', 28, '#FFD54F', 0, 0, 400, 40);
+    this.dataMgr.lastBattleReport = null;
     const ticketP = this.httpRepo ? this.httpRepo.startBattle(stageId, challenge) : Promise.resolve(null);
     Promise.all([ArtAssetManager.loadBattle(), ticketP]).then(([, ticket]) => {
       if (!this.node || !this.node.isValid) return;
@@ -181,7 +182,7 @@ export class GameApp extends Component {
     this.openTab('hall');
     if (!this.httpRepo) return;
     this.httpRepo.submitBattle(this.dataMgr.lastBattleReport).then((r) => {
-      if (r.reason !== 'offline') {
+      if (r.reason !== 'offline' && r.reason !== 'network') {
         // 以服务端结算后的存档为准
         this.dataMgr = new PlayerDataManager(this.httpRepo!);
         this.adService.setCounter(this.dataMgr);

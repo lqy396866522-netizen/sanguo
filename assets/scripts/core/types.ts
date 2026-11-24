@@ -205,6 +205,8 @@ export interface BattleReport {
   kills: number;
   wallHp: number;
   ticks: number;
+  // 结算界面看广告领取了双倍资源
+  doubled?: boolean;
 }
 
 export interface RogueCard {

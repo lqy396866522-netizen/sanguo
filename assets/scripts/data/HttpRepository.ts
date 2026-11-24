@@ -72,6 +72,9 @@ export class HttpRepository implements IDataRepository {
 
   public async startBattle(stageId: number, challenge: boolean): Promise<BattleTicket | null> {
     if (!this.online) return null;
+    // 服务端在开战时快照阵容与加成，必须先把本地扣粮草等改动同步上去
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    await this.flush();
     const res = await this.request<BattleTicket>('POST', '/battle/start', { stageId, challenge });
     if (!res.ok || !res.data) return null;
     this.ticket = { ...res.data, stageId, challenge };
@@ -84,10 +87,19 @@ export class HttpRepository implements IDataRepository {
       this.ticket = null;
       return { ok: false, reason: 'ticket_mismatch' };
     }
+    // 本地结算后的整档不能再上行，否则奖励会与服务端结算重复发放
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = null;
+    const localPending = this.pending;
+    this.pending = null;
     const res = await this.request<{ valid: boolean; reason?: string; profile?: PlayerProfile }>('POST', '/battle/settle', {
       battleId: this.ticket.battleId,
       ...report,
     });
+    if (res.status === 0) {
+      this.pending = localPending;
+      return { ok: false, reason: 'network' };
+    }
     this.ticket = null;
     if (res.data?.profile) this.local.saveProfile(res.data.profile);
     return { ok: !!res.data?.valid, reason: res.data?.reason };
@@ -98,7 +110,9 @@ export class HttpRepository implements IDataRepository {
     if (!this.online || !this.pending) return;
     const profile = this.pending;
     this.pending = null;
-    await this.request('PUT', '/player/profile', { profile });
+    const res = await this.request('PUT', '/player/profile', { profile });
+    // 失败（离线/战斗中被拒）时保留，下一次本地保存时重试
+    if (!res.ok && !this.pending) this.pending = profile;
   }
 
   private wxLoginCode(): Promise<string> {
