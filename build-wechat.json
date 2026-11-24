@@ -1,0 +1,24 @@
+{
+  "name": "sanguo_tafang",
+  "platform": "wechatgame",
+  "buildPath": "project://build",
+  "outputName": "wechatgame",
+  "debug": false,
+  "md5Cache": false,
+  "startScene": "aea36e19-633d-4a0d-b930-b7821ae5b183",
+  "scenes": [
+    {
+      "url": "db://assets/scenes/Main.scene",
+      "uuid": "aea36e19-633d-4a0d-b930-b7821ae5b183"
+    }
+  ],
+  "packages": {
+    "wechatgame": {
+      "appid": "touristappid",
+      "orientation": "portrait",
+      "separateEngine": false,
+      "wasm": "js",
+      "subContext": ""
+    }
+  }
+}

@@ -1,0 +1,10 @@
+library/
+temp/
+local/
+node_modules/
+build/
+profiles/
+*.log
+server/node_modules/
+server/dist/
+server/.env

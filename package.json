@@ -1,0 +1,10 @@
+{
+  "name": "sanguo_tafang",
+  "uuid": "9f6b8c42-3e1a-4b7d-9a2e-7c1d5e8f3a01",
+  "creator": {
+    "version": "3.8.7"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/run_all.test.mjs"
+  }
+}
