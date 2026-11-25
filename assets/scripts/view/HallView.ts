@@ -46,6 +46,7 @@ export class HallView {
 
   public render(): void {
     this.root.removeAllChildren();
+    this.dataMgr.recoverStamina();
     const p = this.dataMgr.profile;
     const stage = STAGE_CONFIGS.find((s) => s.stageId === this.selectedStageId) || STAGE_CONFIGS[0];
 
@@ -76,27 +77,45 @@ export class HallView {
       }
     }, 240, -20, 16, '#A5D6A7');
 
-    // 左侧商业化预留入口（月卡 / 首充 / 活动）
-    createButton(this.root, '月卡\n(预留)', 84, 64, '#5E35B1', () => {
-      showToast(this.root, '月卡特权将在二期商业化版本开放');
-    }, -305, 440, 17, '#CE93D8');
-    createButton(this.root, '首充\n(预留)', 84, 64, '#C62828', () => {
-      showToast(this.root, '首充礼包(送吕布将魂)将在二期开放');
-    }, -305, 360, 17, '#FFAB91');
+    // 顶部下方快捷入口（月卡 / 首充，横排避免与舞台卡片重叠）
+    createButton(this.root, '月卡特权 (预留)', 180, 44, '#5E35B1', () => {
+      showToast(this.root, '月卡特权将在商业化版本开放');
+    }, -210, 466, 17, '#CE93D8');
+    createButton(this.root, '首充礼包 (预留)', 180, 44, '#C62828', () => {
+      showToast(this.root, '首充礼包(送吕布将魂)将在商业化版本开放');
+    }, -10, 466, 17, '#FFAB91');
+    const nextSec = this.dataMgr.getNextStaminaRecoverSec();
+    const staminaTip = nextSec > 0
+      ? `回粮 ${Math.floor(nextSec / 60)}:${String(nextSec % 60).padStart(2, '0')}`
+      : '粮草已满';
+    createLabel(this.root, staminaTip, 17, '#A5D6A7', 220, 466, 160, 28);
 
     // 中部关卡舞台预览
-    const stageBanner = createUINode('StageBanner', 680, 320, this.root, 0, 210);
-    const g = drawRoundedBox(stageBanner, 680, 320, stage.bgTheme, 255, 20, '#9575CD', 2);
+    const stageBanner = createUINode('StageBanner', 680, 310, this.root, 0, 200);
+    const g = drawRoundedBox(stageBanner, 680, 310, stage.bgTheme, 255, 20, '#9575CD', 2);
 
     // 舞台中间画主公 + 已解锁代表武将站位剪影（优先展示真实 Q 版立绘）
     g.fillColor = hexToColor('#4A3B59', 255);
     g.roundRect(-300, -110, 600, 130, 16);
     g.fill();
 
+    const bossArtMap: Record<string, string> = {
+      BOSS_ZHANGBO: 'boss_zhangbao',
+      BOSS_ZHANGJIAO: 'boss_zhangjiao',
+      BOSS_HUAXIONG: 'boss_huaxiong',
+      BOSS_LUBU: 'boss_lubu',
+      BOSS_WENCHOU: 'boss_wenchou',
+      BOSS_CAOREN: 'boss_caoren',
+      BOSS_CAIMAO: 'boss_caimao',
+      BOSS_XIAHOUDUN: 'boss_xiahoudun',
+      BOSS_XIAHOUYUAN: 'boss_xiahouyuan',
+      BOSS_SIMAYI: 'boss_simayi',
+    };
+    const bossKey = bossArtMap[stage.bossId] || 'boss_zhangbao';
     const spLord = ArtAssetManager.createSpriteNode(stageBanner, 'hero_lord', 100, 100, -170, -45);
     const spZhaoyun = ArtAssetManager.createSpriteNode(stageBanner, 'hero_zhaoyun', 86, 86, -85, -20);
     const spHuang = ArtAssetManager.createSpriteNode(stageBanner, 'hero_huangzhong', 86, 86, -85, -75);
-    const spBoss = ArtAssetManager.createSpriteNode(stageBanner, 'boss_zhangbao', 108, 108, 165, -45);
+    const spBoss = ArtAssetManager.createSpriteNode(stageBanner, bossKey, 108, 108, 165, -45);
 
     if (!spLord) {
       g.fillColor = hexToColor('#FFD54F', 255);

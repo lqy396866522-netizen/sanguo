@@ -214,3 +214,35 @@ test('17. 激励视频每日上限：用完后拒绝并跨天重置', async () =
   clock.t += 24 * HOUR;
   assert.equal(mgr.adLeft('daily_stamina'), limit);
 });
+
+test('18. 粮草按时间自然恢复与上限封顶', () => {
+  const clock = makeClock();
+  const mgr = new PlayerDataManager(new MemRepo(), clock.now);
+  assert.equal(mgr.consumeStamina(10), true);
+  assert.equal(mgr.profile.stamina, 40);
+  // 18 分钟应恢复 3 点
+  clock.t += 18 * 60 * 1000;
+  assert.equal(mgr.recoverStamina(), true);
+  assert.equal(mgr.profile.stamina, 43);
+  // 经过很长时间不超过 maxStamina
+  clock.t += 10 * HOUR;
+  mgr.recoverStamina();
+  assert.equal(mgr.profile.stamina, mgr.profile.maxStamina);
+  assert.equal(mgr.getNextStaminaRecoverSec(), 0);
+});
+
+test('19. 军需商店日常货架购买、扣费与每日限购重置', () => {
+  const clock = makeClock();
+  const mgr = new PlayerDataManager(new MemRepo(), clock.now);
+  const goldBefore = mgr.profile.gold;
+  const stoneBefore = mgr.profile.forgeStone;
+  for (let i = 0; i < 5; i++) {
+    const r = mgr.buyShopItem('shop_forge_stone');
+    assert.equal(r.ok, true);
+  }
+  assert.equal(mgr.profile.gold, goldBefore - 5 * 400);
+  assert.equal(mgr.profile.forgeStone, stoneBefore + 50);
+  assert.equal(mgr.buyShopItem('shop_forge_stone').ok, false, '超出每日限购应拒绝');
+  clock.t += 24 * HOUR;
+  assert.equal(mgr.shopLeft('shop_forge_stone'), 5, '跨天应重置限购');
+});

@@ -1679,7 +1679,7 @@ export class BattleWorld {
       diamond: Math.round((win ? (this.getStars() === 3 ? 30 : 15) : 0) * mult),
       forgeStone: Math.round((win ? 4 + s : 1) * mult),
       refineStone: Math.round((win ? 2 : 0) * mult),
-      exp: Math.round((win ? 45 + s * 10 : 15) * mult),
+      exp: Math.round((win ? 140 + s * 50 : 30) * mult),
       shardHeroId: shardHero,
       shardCount: Math.round((win ? 4 : 1) * mult),
       newEquipTier: win && this.rng() < 0.65 ? Math.min(6, Math.ceil(s / 2)) : undefined,

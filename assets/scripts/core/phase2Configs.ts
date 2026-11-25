@@ -132,3 +132,21 @@ export const AD_DAILY_LIMITS: Record<string, number> = {
   patrol_double: 3,
   patrol_quick: 1,
 };
+
+// ---------- 军需商店日常货架 ----------
+export interface DailyShopItemConfig {
+  id: string;
+  name: string;
+  desc: string;
+  currency: 'gold' | 'diamond';
+  price: number;
+  dailyLimit: number;
+}
+
+export const DAILY_SHOP_ITEMS: DailyShopItemConfig[] = [
+  { id: 'shop_forge_stone',  name: '锻造石 ×10',     desc: '强化装备槽位',       currency: 'gold',    price: 400, dailyLimit: 5 },
+  { id: 'shop_refine_stone', name: '洗炼石 ×5',      desc: '改良装备副词条',     currency: 'diamond', price: 40,  dailyLimit: 3 },
+  { id: 'shop_gem_bag',      name: '精良宝石袋',     desc: '随机获得3品(蓝)宝石', currency: 'diamond', price: 80,  dailyLimit: 3 },
+  { id: 'shop_hero_shards',  name: '名将将魂 ×10',   desc: '随机名将将魂',       currency: 'diamond', price: 100, dailyLimit: 3 },
+  { id: 'shop_stamina',      name: '行军粮草 ×25',   desc: '立即补充25点粮草',   currency: 'diamond', price: 30,  dailyLimit: 3 },
+];

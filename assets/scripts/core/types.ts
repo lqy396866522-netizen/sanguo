@@ -186,6 +186,8 @@ export interface PlayerProfile {
   weaponId: string;
   ownedWeapons: string[];
   adDaily: { day: string; counts: Record<string, number> };
+  lastStaminaAt?: number;
+  shopDaily?: { day: string; counts: Record<string, number> };
   checksum?: string;
 }
 

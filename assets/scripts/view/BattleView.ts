@@ -403,7 +403,9 @@ export class BattleView {
     drawLeftAlignedBar(this.barExpFill, 632, 18, '#FFD54F', 6);
     this.lblLevel = createLabel(expBg, '主公 Lv.1', 16, '#FFFFFF', 0, 0, 200, 24);
 
-    createLabel(hud, '道路外任意空地均可放置武将，战斗中可自由拖拽调阵', 16, '#FFE082', 0, -622, 600, 24);
+    const hintBg = createUINode('HintBg', 580, 28, hud, 0, -622);
+    drawRoundedBox(hintBg, 580, 28, '#140E1C', 210, 8);
+    createLabel(hintBg, '道路外任意空地均可放置武将，战斗中可自由拖拽调阵', 16, '#FFE082', 0, 0, 560, 24);
   }
 
   private bindTouchEvents(): void {

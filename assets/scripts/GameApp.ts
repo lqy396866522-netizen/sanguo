@@ -11,6 +11,7 @@ import { LocalRepository } from './data/LocalRepository.ts';
 import { PlayerDataManager } from './data/PlayerDataManager.ts';
 import { HttpRepository } from './data/HttpRepository.ts';
 import { GAME_CONFIG } from './data/GameConfig.ts';
+import { DAILY_SHOP_ITEMS } from './core/phase2Configs.ts';
 import { MockShopService } from './sdk/MockServices.ts';
 import { WechatAdService } from './sdk/WechatAdService.ts';
 import { HallView } from './view/HallView';
@@ -130,11 +131,21 @@ export class GameApp extends Component {
   private renderShop(renderTabs: (a: TabKey) => void): void {
     const bg = createUINode('ShopBg', 750, 1334, this.viewRoot, 0, 0);
     drawRoundedBox(bg, 750, 1334, '#241B30', 255, 0);
-    createLabel(bg, '军需商店', 32, '#FFD54F', 0, 480, 620, 48);
-    createLabel(bg, '虚拟支付需企业主体 AppID 开通后上线，当前为预览', 20, '#B39DDB', 0, 430, 620, 32);
+    const p = this.dataMgr.profile;
+    createLabel(bg, '军需商店', 30, '#FFD54F', 0, 540, 620, 42);
+    createLabel(
+      bg,
+      `元宝 ${p.diamond}   |   铜钱 ${p.gold}   |   粮草 ${p.stamina}/${p.maxStamina}`,
+      20,
+      '#E0E0E0',
+      0,
+      492,
+      680,
+      30
+    );
 
     const chestLeft = this.dataMgr.adLeft('shop_free_chest');
-    createButton(bg, `每日免费宝箱 (广告 ${chestLeft}/1)`, 560, 80, chestLeft > 0 ? '#2E7D32' : '#546E7A', async () => {
+    createButton(bg, `每日免费宝箱 (广告 ${chestLeft}/1) · 铜钱×500 锻造石×5`, 640, 64, chestLeft > 0 ? '#2E7D32' : '#546E7A', async () => {
       const res = await this.adService.showRewardedAd('shop_free_chest');
       if (res.completed) {
         this.dataMgr.profile.gold += 500;
@@ -146,13 +157,38 @@ export class GameApp extends Component {
       } else {
         showToast(this.viewRoot, '今日已领取');
       }
-    }, 0, 300, 22);
+    }, 0, 426, 20);
 
+    // 日常军需货架（铜钱/元宝）
+    DAILY_SHOP_ITEMS.forEach((item, idx) => {
+      const left = this.dataMgr.shopLeft(item.id);
+      const y = 344 - idx * 78;
+      const unit = item.currency === 'gold' ? '铜钱' : '元宝';
+      const btnColor = left > 0 ? (item.currency === 'gold' ? '#5D4037' : '#283593') : '#455A64';
+      createButton(
+        bg,
+        `${item.name} (${item.price}${unit}) · ${item.desc}  [今日剩${left}/${item.dailyLimit}]`,
+        640,
+        66,
+        btnColor,
+        () => {
+          const r = this.dataMgr.buyShopItem(item.id);
+          if (r.ok) AudioManager.playSfx('sfx_coin');
+          showToast(this.viewRoot, r.msg);
+          if (r.ok) this.openTab('shop');
+        },
+        0,
+        y,
+        18
+      );
+    });
+
+    createLabel(bg, '商业化充值特权（企业主体 AppID 开通后上线）', 18, '#B39DDB', 0, -68, 660, 28);
     this.shopService.getProducts().forEach((prod, i) => {
-      createButton(bg, `${prod.name} (¥${prod.priceYuan})\n${prod.desc}`, 560, 100, '#311B92', async () => {
+      createButton(bg, `${prod.name} (¥${prod.priceYuan})\n${prod.desc}`, 640, 74, '#311B92', async () => {
         const r = await this.shopService.purchase(prod.id);
         showToast(this.viewRoot, r.msg);
-      }, 0, 170 - i * 120, 19);
+      }, 0, -130 - i * 86, 17);
     });
     renderTabs('shop');
   }

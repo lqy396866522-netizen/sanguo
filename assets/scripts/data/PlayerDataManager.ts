@@ -18,6 +18,7 @@ import {
   BASE_TECH_CONFIGS,
   BASE_UNLOCK_LORD_LEVEL,
   CHALLENGE_RULES,
+  DAILY_SHOP_ITEMS,
   PATROL_RULES,
   TALENT_CONFIGS,
   WEAPON_CONFIGS,
@@ -31,6 +32,7 @@ import type { LordBattleBonus } from '../core/BattleWorld.ts';
 
 export const SCHEMA_VERSION = 3;
 const BASE_MAX_STAMINA = 50;
+export const STAMINA_RECOVER_MS = 6 * 60 * 1000; // 每 6 分钟恢复 1 点粮草
 const TALENT_RESET_DIAMOND = 100;
 
 export interface OpResult {
@@ -77,6 +79,7 @@ export class PlayerDataManager {
       }
       this.syncUnlockConditions();
       this.syncMaxStamina();
+      this.recoverStamina();
       this.save();
     } else {
       this.profile = this.createDefaultProfile();
@@ -92,6 +95,8 @@ export class PlayerDataManager {
     p.weaponId = p.weaponId || 'crossbow';
     p.ownedWeapons = p.ownedWeapons || ['crossbow'];
     p.adDaily = p.adDaily || { day: '', counts: {} };
+    p.lastStaminaAt = p.lastStaminaAt || this.now();
+    p.shopDaily = p.shopDaily || { day: '', counts: {} };
   }
 
   private dayKey(): string {
@@ -119,7 +124,7 @@ export class PlayerDataManager {
     for (const h of HERO_CONFIGS) {
       heroes[h.id] = {
         heroId: h.id,
-        unlocked: h.unlockType === 'INIT',
+        unlocked: true, // 调优期暂时全部放开，商业化版本可按 h.unlockType === 'INIT' 恢复门槛
         level: 1,
         shards: h.unlockType === 'INIT' ? 5 : 0,
       };
@@ -204,9 +209,9 @@ export class PlayerDataManager {
     for (let s = 1; s <= 6; s++) {
       const slot = this.profile.equipSlots[s];
       if (!slot) continue;
-      const factor = 1 + (slot.slotLevel - 1) * 0.14 + (slot.equipTier - 1) * 0.35 + (slot.equipQuality - 1) * 0.12;
-      if (s === 1 || s === 2 || s === 6) atk += Math.round(14 * factor);
-      else wallHp += Math.round(240 * factor);
+      const factor = 1 + (slot.slotLevel - 1) * 0.18 + (slot.equipTier - 1) * 0.35 + (slot.equipQuality - 1) * 0.12;
+      if (s === 1 || s === 2 || s === 6) atk += Math.round(18 * factor);
+      else wallHp += Math.round(260 * factor);
 
       for (const af of slot.affixes) {
         if (af.type === 'atk_pct') atk = Math.round(atk * (1 + af.value / 100));
@@ -356,6 +361,61 @@ export class PlayerDataManager {
     this.rollAdDay();
     this.profile.adDaily.counts[placement] = (this.profile.adDaily.counts[placement] || 0) + 1;
     this.save();
+  }
+
+  // ---------- 军需商店日常货架 ----------
+  private rollShopDay(): void {
+    const day = this.dayKey();
+    if (!this.profile.shopDaily || this.profile.shopDaily.day !== day) {
+      this.profile.shopDaily = { day, counts: {} };
+    }
+  }
+
+  public shopLeft(itemId: string): number {
+    this.rollShopDay();
+    const cfg = DAILY_SHOP_ITEMS.find((i) => i.id === itemId);
+    if (!cfg) return 0;
+    return Math.max(0, cfg.dailyLimit - (this.profile.shopDaily!.counts[itemId] || 0));
+  }
+
+  public buyShopItem(itemId: string): OpResult {
+    this.rollShopDay();
+    const cfg = DAILY_SHOP_ITEMS.find((i) => i.id === itemId);
+    if (!cfg) return { ok: false, msg: '商品不存在' };
+    if (this.shopLeft(itemId) <= 0) return { ok: false, msg: '今日限购次数已用完' };
+
+    if (cfg.currency === 'gold') {
+      if (this.profile.gold < cfg.price) return { ok: false, msg: '铜钱不足' };
+      this.profile.gold -= cfg.price;
+    } else {
+      if (this.profile.diamond < cfg.price) return { ok: false, msg: '元宝不足' };
+      this.profile.diamond -= cfg.price;
+    }
+
+    this.profile.shopDaily!.counts[itemId] = (this.profile.shopDaily!.counts[itemId] || 0) + 1;
+    let rewardMsg = '';
+    if (itemId === 'shop_forge_stone') {
+      this.profile.forgeStone += 10;
+      rewardMsg = '获得 锻造石 ×10';
+    } else if (itemId === 'shop_refine_stone') {
+      this.profile.refineStone += 5;
+      rewardMsg = '获得 洗炼石 ×5';
+    } else if (itemId === 'shop_gem_bag') {
+      const slot = (Math.floor(Math.random() * 6) + 1) as EquipSlotType;
+      const gem = this.makeGem(slot, 3);
+      this.profile.gems.push(gem);
+      const meta = GEM_AFFIX_META[gem.affixType];
+      rewardMsg = `获得 精良宝石【${meta.name}】`;
+    } else if (itemId === 'shop_hero_shards') {
+      const h = HERO_CONFIGS[Math.floor(Math.random() * HERO_CONFIGS.length)];
+      if (this.profile.heroes[h.id]) this.profile.heroes[h.id].shards += 10;
+      rewardMsg = `获得 ${h.name}将魂 ×10`;
+    } else if (itemId === 'shop_stamina') {
+      this.profile.stamina = Math.min(this.profile.maxStamina + 25, this.profile.stamina + 25);
+      rewardMsg = '获得 行军粮草 ×25';
+    }
+    this.save();
+    return { ok: true, msg: rewardMsg };
   }
 
   // ---------- 精英挑战 ----------
@@ -597,21 +657,57 @@ export class PlayerDataManager {
     for (const h of HERO_CONFIGS) {
       const save = this.profile.heroes[h.id];
       if (!save || save.unlocked) continue;
-      if (h.unlockType === 'INIT') save.unlocked = true;
-      else if (h.unlockType === 'LORD_LEVEL' && this.profile.level >= h.unlockParam) save.unlocked = true;
-      else if (h.unlockType === 'STAGE_CLEAR' && this.profile.maxClearedStage >= h.unlockParam) save.unlocked = true;
+      // 调优期暂时全放开，商业化版本可恢复 INIT / LORD_LEVEL / STAGE_CLEAR 判定
+      save.unlocked = true;
     }
   }
 
+  public recoverStamina(): boolean {
+    const now = this.now();
+    if (!this.profile.lastStaminaAt) {
+      this.profile.lastStaminaAt = now;
+      return false;
+    }
+    if (this.profile.stamina >= this.profile.maxStamina) {
+      this.profile.lastStaminaAt = now;
+      return false;
+    }
+    const elapsed = Math.max(0, now - this.profile.lastStaminaAt);
+    const gained = Math.floor(elapsed / STAMINA_RECOVER_MS);
+    if (gained <= 0) return false;
+    this.profile.stamina = Math.min(this.profile.maxStamina, this.profile.stamina + gained);
+    this.profile.lastStaminaAt = this.profile.stamina >= this.profile.maxStamina
+      ? now
+      : this.profile.lastStaminaAt + gained * STAMINA_RECOVER_MS;
+    this.save();
+    return true;
+  }
+
+  public getNextStaminaRecoverSec(): number {
+    this.recoverStamina();
+    if (this.profile.stamina >= this.profile.maxStamina) return 0;
+    const last = this.profile.lastStaminaAt || this.now();
+    const remainMs = Math.max(0, STAMINA_RECOVER_MS - (this.now() - last));
+    return Math.ceil(remainMs / 1000);
+  }
+
   public consumeStamina(amount: number): boolean {
+    this.recoverStamina();
     if (this.profile.stamina < amount) return false;
+    const wasFull = this.profile.stamina >= this.profile.maxStamina;
     this.profile.stamina -= amount;
+    if (wasFull && this.profile.stamina < this.profile.maxStamina) {
+      this.profile.lastStaminaAt = this.now();
+    }
     this.save();
     return true;
   }
 
   public addStamina(amount: number): void {
     this.profile.stamina = Math.min(this.profile.maxStamina, this.profile.stamina + amount);
+    if (this.profile.stamina >= this.profile.maxStamina) {
+      this.profile.lastStaminaAt = this.now();
+    }
     this.save();
   }
 
