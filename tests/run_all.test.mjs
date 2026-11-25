@@ -185,16 +185,26 @@ test('4. 点将台自由选位、拖拽换位冷却与端到端战役战斗模�
   assert.equal(world.phase, 'VICTORY', '强化后的阵容应在自动托管下成功击败第1关Boss张宝');
 });
 
-test('5. 微信构建场景UUID与config.json一致性回归测试', () => {
+test('5a. 微信构建配置与 Main.scene UUID 源码一致性', () => {
   const root = process.cwd();
   const meta = JSON.parse(fs.readFileSync(path.join(root, 'assets/scenes/Main.scene.meta'), 'utf8'));
   const buildCfg = JSON.parse(fs.readFileSync(path.join(root, 'build-wechat.json'), 'utf8'));
 
   assert.equal(buildCfg.startScene, meta.uuid, 'build-wechat.json startScene 必须等于 Main.scene.meta uuid');
   assert.equal(buildCfg.scenes[0].uuid, meta.uuid, 'build-wechat.json scenes[0].uuid 必须等于 Main.scene.meta uuid');
+});
 
-  const settings = JSON.parse(fs.readFileSync(path.join(root, 'build/wechatgame/src/settings.json'), 'utf8'));
-  const mainConfig = JSON.parse(fs.readFileSync(path.join(root, 'build/wechatgame/assets/main/config.json'), 'utf8'));
+test('5b. 微信导出产物 settings/config 启动场景一致性', (t) => {
+  const root = process.cwd();
+  const settingsPath = path.join(root, 'build/wechatgame/src/settings.json');
+  const mainConfigPath = path.join(root, 'build/wechatgame/assets/main/config.json');
+  if (!fs.existsSync(settingsPath) || !fs.existsSync(mainConfigPath)) {
+    t.skip('本地尚未导出 build/wechatgame，跳过构建产物启动场景一致性校验');
+    return;
+  }
+
+  const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const mainConfig = JSON.parse(fs.readFileSync(mainConfigPath, 'utf8'));
   const launchScene = settings.launch.launchScene;
   assert.ok(
     Object.prototype.hasOwnProperty.call(mainConfig.scenes, launchScene),
