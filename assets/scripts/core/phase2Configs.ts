@@ -42,6 +42,7 @@ export const WEAPON_CONFIGS: WeaponConfig[] = [
   { id: 'zhuge', name: '诸葛连弩', desc: '每次攻击额外齐射 +1 支弩箭', unlockLordLevel: 4, costDiamond: 300, bulletColor: '#4DD0E1', multishot: 1, pierce: 0, critRate: 0, thunderChance: 0 },
   { id: 'luori', name: '落日神弓', desc: '弩箭穿透 +1，暴击率 +6%', unlockLordLevel: 8, costDiamond: 600, bulletColor: '#FFB300', multishot: 0, pierce: 1, critRate: 0.06, thunderChance: 0 },
   { id: 'pili', name: '霹雳雷弩', desc: '命中 25% 概率引雷麻痹 0.5 秒', unlockLordLevel: 12, costDiamond: 900, bulletColor: '#B388FF', multishot: 0, pierce: 0, critRate: 0, thunderChance: 0.25 },
+  { id: 'bawang', name: '霸王破阵弩', desc: '齐射 +1、穿透 +1、暴击率 +10%', unlockLordLevel: 18, costDiamond: 1500, bulletColor: '#FF5252', multishot: 1, pierce: 1, critRate: 0.10, thunderChance: 0 },
 ];
 
 export function getWeaponConfig(id?: string): WeaponConfig {
@@ -63,16 +64,16 @@ export interface TalentConfig {
 export const TALENT_BRANCH_NAMES: Record<TalentBranch, string> = { atk: '攻伐', def: '固守', res: '屯田' };
 
 export const TALENT_CONFIGS: TalentConfig[] = [
-  { id: 'T_ATK',      branch: 'atk', name: '强弩之末', desc: '主公攻击力 +{v}%', perLevel: 3, maxLevel: 5 },
-  { id: 'T_CRIT',     branch: 'atk', name: '鹰眼',     desc: '暴击率 +{v}%', perLevel: 1, maxLevel: 5 },
-  { id: 'T_CRITDMG',  branch: 'atk', name: '致命一击', desc: '暴击伤害 +{v}%', perLevel: 4, maxLevel: 5 },
-  { id: 'T_HERO',     branch: 'atk', name: '将帅同心', desc: '全体武将伤害 +{v}%', perLevel: 3, maxLevel: 5 },
-  { id: 'T_WALL',     branch: 'def', name: '高筑墙',   desc: '城防生命 +{v}%', perLevel: 4, maxLevel: 5 },
-  { id: 'T_REDUCE',   branch: 'def', name: '铁壁',     desc: '城防减伤 +{v}%', perLevel: 1.5, maxLevel: 5 },
-  { id: 'T_IMMUNE',   branch: 'def', name: '金汤',     desc: '开局城防免伤 +{v} 次', perLevel: 1, maxLevel: 3 },
-  { id: 'T_EXP',      branch: 'res', name: '广积粮',   desc: '局内经验获取 +{v}%', perLevel: 4, maxLevel: 5 },
-  { id: 'T_GOLD',     branch: 'res', name: '缓称王',   desc: '战斗结算铜钱 +{v}%', perLevel: 5, maxLevel: 5 },
-  { id: 'T_STAMINA',  branch: 'res', name: '屯田制',   desc: '粮草上限 +{v}', perLevel: 2, maxLevel: 5 },
+  { id: 'T_ATK',      branch: 'atk', name: '强弩之末', desc: '主公攻击力 +{v}%', perLevel: 3, maxLevel: 10 },
+  { id: 'T_CRIT',     branch: 'atk', name: '鹰眼',     desc: '暴击率 +{v}%', perLevel: 1, maxLevel: 10 },
+  { id: 'T_CRITDMG',  branch: 'atk', name: '致命一击', desc: '暴击伤害 +{v}%', perLevel: 4, maxLevel: 10 },
+  { id: 'T_HERO',     branch: 'atk', name: '将帅同心', desc: '全体武将伤害 +{v}%', perLevel: 3, maxLevel: 10 },
+  { id: 'T_WALL',     branch: 'def', name: '高筑墙',   desc: '城防生命 +{v}%', perLevel: 4, maxLevel: 10 },
+  { id: 'T_REDUCE',   branch: 'def', name: '铁壁',     desc: '城防减伤 +{v}%', perLevel: 1.5, maxLevel: 10 },
+  { id: 'T_IMMUNE',   branch: 'def', name: '金汤',     desc: '开局城防免伤 +{v} 次', perLevel: 1, maxLevel: 5 },
+  { id: 'T_EXP',      branch: 'res', name: '广积粮',   desc: '局内经验获取 +{v}%', perLevel: 4, maxLevel: 10 },
+  { id: 'T_GOLD',     branch: 'res', name: '缓称王',   desc: '战斗结算铜钱 +{v}%', perLevel: 5, maxLevel: 10 },
+  { id: 'T_STAMINA',  branch: 'res', name: '屯田制',   desc: '粮草上限 +{v}', perLevel: 2, maxLevel: 10 },
 ];
 
 export function talentPointsForLevel(lordLevel: number): number {
@@ -91,11 +92,11 @@ export interface BaseTechConfig {
 export const BASE_UNLOCK_LORD_LEVEL = 3;
 
 export const BASE_TECH_CONFIGS: BaseTechConfig[] = [
-  { id: 'B_WALL',      name: '城墙加固', desc: '城防生命上限 +{v}%', perLevel: 6, maxLevel: 10 },
-  { id: 'B_BARRICADE', name: '拒马阵',   desc: '城墙前方拒马区敌军减速 {v}%', perLevel: 6, maxLevel: 5 },
-  { id: 'B_TOWER',     name: '箭塔',     desc: '城墙两端箭塔自动射击，伤害系数 {v}%', perLevel: 20, maxLevel: 5 },
-  { id: 'B_BEACON',    name: '烽火台',   desc: '局内经验获取 +{v}%', perLevel: 5, maxLevel: 5 },
-  { id: 'B_GRANARY',   name: '粮仓',     desc: '粮草上限 +{v}，巡逻收益同步提升', perLevel: 5, maxLevel: 5 },
+  { id: 'B_WALL',      name: '城墙加固', desc: '城防生命上限 +{v}%', perLevel: 6, maxLevel: 15 },
+  { id: 'B_BARRICADE', name: '拒马阵',   desc: '城墙前方拒马区敌军减速 {v}%', perLevel: 6, maxLevel: 10 },
+  { id: 'B_TOWER',     name: '箭塔',     desc: '城墙两端箭塔自动射击，伤害系数 {v}%', perLevel: 20, maxLevel: 10 },
+  { id: 'B_BEACON',    name: '烽火台',   desc: '局内经验获取 +{v}%', perLevel: 5, maxLevel: 10 },
+  { id: 'B_GRANARY',   name: '粮仓',     desc: '粮草上限 +{v}，巡逻收益同步提升', perLevel: 5, maxLevel: 10 },
 ];
 
 export function baseTechCost(level: number): { gold: number; forgeStone: number } {
@@ -115,7 +116,7 @@ export function patrolHourlyYield(maxClearedStage: number, granaryLevel: number)
   const mult = 1 + granaryLevel * 0.05;
   return {
     gold: Math.round((120 + 40 * s) * mult),
-    exp: Math.round((20 + 5 * s) * mult),
+    exp: Math.round((8 + 1.5 * s) * mult),
     forgeStone: Math.round((0.6 + 0.15 * s) * mult * 10) / 10,
   };
 }

@@ -1222,7 +1222,8 @@ export class BattleWorld {
       this.floatTexts.push({ x: LORD_POS.x, y: WALL_Y + 25, text: '免疫!', color: '#4FC3F7', scale: 1.0 });
       return;
     }
-    const dmg = Math.max(1, Math.round(raw * (1 - this.wallDamageReduce)));
+    const stageScale = this.stage.stageId > 10 ? 1 + (this.stage.stageId - 10) * 0.05 : 1;
+    const dmg = Math.max(1, Math.round(raw * stageScale * (1 - this.wallDamageReduce)));
     this.wallHp = Math.max(0, this.wallHp - dmg);
     this.shakeRequest = Math.max(this.shakeRequest, dmg >= 150 ? 7 : 3);
   }
@@ -1671,18 +1672,18 @@ export class BattleWorld {
     const win = this.phase === 'VICTORY';
     const mult = (doubleReward ? 2 : 1) * (this.challenge ? CHALLENGE_RULES.rewardMult : 1);
     const s = this.stage.stageId;
-    const baseGold = win ? 220 + s * 60 : Math.max(40, this.kills * 4);
+    const baseGold = win ? 200 + s * 32 : Math.max(40, this.kills * 4);
     const shardHero = HERO_CONFIGS[(s + Math.floor(this.rng() * 3)) % HERO_CONFIGS.length].id;
 
     return {
       gold: Math.round(baseGold * mult),
       diamond: Math.round((win ? (this.getStars() === 3 ? 30 : 15) : 0) * mult),
-      forgeStone: Math.round((win ? 4 + s : 1) * mult),
+      forgeStone: Math.round((win ? 3 + Math.ceil(s * 0.45) : 1) * mult),
       refineStone: Math.round((win ? 2 : 0) * mult),
-      exp: Math.round((win ? 140 + s * 50 : 30) * mult),
+      exp: Math.round((win ? 140 + s * 40 : 30) * mult),
       shardHeroId: shardHero,
-      shardCount: Math.round((win ? 4 : 1) * mult),
-      newEquipTier: win && this.rng() < 0.65 ? Math.min(6, Math.ceil(s / 2)) : undefined,
+      shardCount: Math.round((win ? 4 + Math.floor(s / 10) : 1) * mult),
+      newEquipTier: win && this.rng() < 0.65 ? Math.min(10, Math.ceil(s / 5)) : undefined,
     };
   }
 

@@ -232,18 +232,30 @@ test('6. 主公射程/输出降权与武将核心伤害占比测试', () => {
   assert.ok(heroDmg / totalDmg > 0.45, `武将输出占比(${(heroDmg / totalDmg * 100).toFixed(1)}%)应高于45%，不再被主公抢光`);
 });
 
-test('7. 10关专属曲折地图、随机坑位与任意空地自由放置/压路拦截测试', () => {
-  // 10 关每关路径至少包含 4 个以上折点且各不相同
-  const pathSignatures = new Set();
+test('7. 前50关专属曲折地图、随机坑位与任意空地自由放置/压路拦截测试', () => {
+  assert.equal(STAGE_CONFIGS.length, 50, '应完整配置前50关');
+  // 前10关拥有10套互不相同路径，50关总体路径丰富且每关>=5个折点
+  const first10Signatures = new Set();
+  const allSignatures = new Set();
   for (const st of STAGE_CONFIGS) {
     assert.ok(st.paths.length >= 1);
     assert.ok(st.paths[0].length >= 5, `第${st.stageId}关路径应包含多个弯道折点`);
-    pathSignatures.add(JSON.stringify(st.paths));
+    const sig = JSON.stringify(st.paths);
+    if (st.stageId <= 10) first10Signatures.add(sig);
+    allSignatures.add(sig);
   }
-  assert.equal(pathSignatures.size, 10, '10关应拥有10套互不相同的曲折地图路径');
+  assert.equal(first10Signatures.size, 10, '前10关应拥有10套互不相同的曲折地图路径');
+  assert.ok(allSignatures.size >= 25, `50关应拥有至少25套不同路径变体(当前${allSignatures.size})`);
 
   const repo = new LocalRepository();
   const mgr = new PlayerDataManager(repo);
+  for (const sid of [1, 15, 30, 50]) {
+    const sample = new BattleWorld(sid, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 100 + sid });
+    assert.ok(sample.suggestedSlots.length >= 6, `第${sid}关应生成至少6个推荐坑位`);
+    for (const s of sample.suggestedSlots) {
+      assert.equal(sample.isPositionValidForDeploy(s.x, s.y).valid, true, `第${sid}关坑位(${s.x},${s.y})必须合法`);
+    }
+  }
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus());
 
   // 随机生成的推荐黄金坑位必须全部合法（不压路、不重叠）

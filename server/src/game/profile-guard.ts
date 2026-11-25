@@ -10,7 +10,7 @@ export const PUT_LIMITS = {
   forgeStoneDelta: 400,
   refineStoneDelta: 200,
   levelDelta: 3,
-  firstUpload: { diamond: 20000, gold: 5000000, level: 60, maxClearedStage: 10 },
+  firstUpload: { diamond: 20000, gold: 5000000, level: 100, maxClearedStage: 50 },
 };
 
 export interface GuardResult {

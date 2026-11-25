@@ -209,9 +209,9 @@ export class PlayerDataManager {
     for (let s = 1; s <= 6; s++) {
       const slot = this.profile.equipSlots[s];
       if (!slot) continue;
-      const factor = 1 + (slot.slotLevel - 1) * 0.18 + (slot.equipTier - 1) * 0.35 + (slot.equipQuality - 1) * 0.12;
+      const factor = 1 + (slot.slotLevel - 1) * 0.22 + (slot.equipTier - 1) * 0.45 + (slot.equipQuality - 1) * 0.15;
       if (s === 1 || s === 2 || s === 6) atk += Math.round(18 * factor);
-      else wallHp += Math.round(260 * factor);
+      else wallHp += Math.round(280 * factor);
 
       for (const af of slot.affixes) {
         if (af.type === 'atk_pct') atk = Math.round(atk * (1 + af.value / 100));
@@ -492,8 +492,8 @@ export class PlayerDataManager {
   public upgradeEquipSlot(slotType: EquipSlotType): { ok: boolean; msg: string } {
     const slot = this.profile.equipSlots[slotType];
     if (!slot) return { ok: false, msg: '部位不存在' };
-    const costGold = 100 + slot.slotLevel * 60;
-    const costStone = 2 + Math.floor(slot.slotLevel / 2);
+    const costGold = 100 + slot.slotLevel * 60 + Math.max(0, slot.slotLevel - 10) * 80;
+    const costStone = 2 + Math.floor(slot.slotLevel / 2) + Math.max(0, Math.floor((slot.slotLevel - 10) / 3));
     if (this.profile.gold < costGold) return { ok: false, msg: '铜钱不足' };
     if (this.profile.forgeStone < costStone) return { ok: false, msg: '锻造石不足' };
 
@@ -644,10 +644,14 @@ export class PlayerDataManager {
     return { ok: true, msg: `升级至 Lv.${save.level}` };
   }
 
+  public lordExpNeeded(level = this.profile.level): number {
+    return level <= 12 ? level * 100 : 1200 + (level - 12) * 260;
+  }
+
   public addLordExp(exp: number): void {
     this.profile.exp += exp;
-    while (this.profile.exp >= this.profile.level * 100) {
-      this.profile.exp -= this.profile.level * 100;
+    while (this.profile.exp >= this.lordExpNeeded(this.profile.level)) {
+      this.profile.exp -= this.lordExpNeeded(this.profile.level);
       this.profile.level += 1;
     }
     this.syncUnlockConditions();
@@ -738,11 +742,11 @@ export class PlayerDataManager {
     }
     if (reward.newEquipTier) {
       const slotType = ((Math.floor(Math.random() * 6) + 1) as EquipSlotType);
-      this.equipHigherTier(slotType, reward.newEquipTier, Math.min(5, reward.newEquipTier + 1));
+      this.equipHigherTier(slotType, reward.newEquipTier, Math.min(6, 1 + Math.ceil(reward.newEquipTier / 2)));
     }
     if (stars > 0) {
       const gemSlot = ((Math.floor(Math.random() * 6) + 1) as EquipSlotType);
-      const gem = this.makeGem(gemSlot, Math.min(4, 1 + Math.floor(stageId / 3)));
+      const gem = this.makeGem(gemSlot, Math.min(4, 1 + Math.floor((stageId - 1) / 10)));
       this.profile.gems.push(gem);
       reward.newGem = gem;
 

@@ -138,25 +138,34 @@ export class HallView {
       g.fill();
     }
 
-    createLabel(stageBanner, `第 ${stage.stageId} 关 · ${stage.name}`, 30, '#FFFFFF', 0, 118, 420, 42);
-    createLabel(stageBanner, stage.desc, 19, '#E1BEE7', 0, 78, 560, 30);
+    const chapter = Math.ceil(stage.stageId / 10);
+    createLabel(stageBanner, `第${chapter}章 · 第 ${stage.stageId} 关 · ${stage.name}`, 25, '#FFFFFF', 0, 118, 410, 42);
+    createLabel(stageBanner, stage.desc, 19, '#E1BEE7', 0, 78, 520, 30);
     createLabel(stageBanner, '主公军阵', 17, '#FFE082', -150, -118, 120, 26);
     createLabel(stageBanner, '敌军首领', 17, '#FF8A80', 165, -118, 120, 26);
 
-    // 左右切换关卡 + ? 情报按钮
-    createButton(stageBanner, '<', 48, 56, '#4527A0', () => {
+    // 左右切换关卡（含 ±5 快捷切换）+ ? 情报按钮
+    createButton(stageBanner, '«', 44, 52, '#311B92', () => {
+      this.selectedStageId = Math.max(1, this.selectedStageId - 5);
+      this.render();
+    }, -298, 115, 22);
+    createButton(stageBanner, '<', 44, 52, '#4527A0', () => {
       if (this.selectedStageId > 1) {
         this.selectedStageId--;
         this.render();
       }
-    }, -290, 115, 26);
+    }, -248, 115, 24);
 
-    createButton(stageBanner, '>', 48, 56, '#4527A0', () => {
+    createButton(stageBanner, '>', 44, 52, '#4527A0', () => {
       if (this.selectedStageId < STAGE_CONFIGS.length) {
         this.selectedStageId++;
         this.render();
       }
-    }, 290, 115, 26);
+    }, 248, 115, 24);
+    createButton(stageBanner, '»', 44, 52, '#311B92', () => {
+      this.selectedStageId = Math.min(STAGE_CONFIGS.length, this.selectedStageId + 5);
+      this.render();
+    }, 298, 115, 22);
 
     createButton(stageBanner, '?', 44, 44, '#00838F', () => {
       this.showStageInfoModal(stage.stageId);

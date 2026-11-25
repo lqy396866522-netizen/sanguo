@@ -74,7 +74,8 @@ export const VFX_ART_KEY_MAP: Record<string, string> = {
 };
 
 export function stageBgKey(stageId: number): string {
-  return `bg_stage${stageId}`;
+  const idx = ((Math.max(1, stageId) - 1) % 10) + 1;
+  return `bg_stage${idx}`;
 }
 
 function battleBundleKeys(): string[] {

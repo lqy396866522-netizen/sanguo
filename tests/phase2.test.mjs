@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HERO_CONFIGS } from '../assets/scripts/core/configs.ts';
+import { HERO_CONFIGS, STAGE_CONFIGS } from '../assets/scripts/core/configs.ts';
 import { BattleWorld, FIXED_DT } from '../assets/scripts/core/BattleWorld.ts';
 import { replayBattle } from '../assets/scripts/core/BattleReplay.ts';
 import { AD_DAILY_LIMITS, PATROL_RULES, WEAPON_CONFIGS, baseTechCost } from '../assets/scripts/core/phase2Configs.ts';
@@ -245,4 +245,49 @@ test('19. 军需商店日常货架购买、扣费与每日限购重置', () => {
   assert.equal(mgr.buyShopItem('shop_forge_stone').ok, false, '超出每日限购应拒绝');
   clock.t += 24 * HOUR;
   assert.equal(mgr.shopLeft('shop_forge_stone'), 5, '跨天应重置限购');
+});
+
+test('20. 前50关商业化卡点验证：裸奔难通前10关，强化装备与天赋后可突破', () => {
+  assert.equal(STAGE_CONFIGS.length, 50);
+
+  const nakedMgr = new PlayerDataManager(new MemRepo(), makeClock().now);
+  const nakedWorld = runAuto(new BattleWorld(10, nakedMgr.profile.heroes, nakedMgr.getLordBattleBonus(), { seed: 901 }));
+  assert.notEqual(nakedWorld.phase, 'VICTORY', '零强化初始状态不应一次性打通第10关强卡点');
+
+  const upMgr = new PlayerDataManager(new MemRepo(), makeClock().now);
+  const p0 = upMgr.getCombatPower();
+  upMgr.profile.level = 10;
+  upMgr.profile.gold = 120000;
+  upMgr.profile.forgeStone = 1200;
+  upMgr.profile.diamond = 2000;
+  for (let s = 1; s <= 6; s++) {
+    upMgr.equipHigherTier(s, 3, 4);
+    for (let lv = 0; lv < 11; lv++) upMgr.upgradeEquipSlot(s);
+  }
+  for (const tid of ['T_HERO', 'T_HERO', 'T_HERO', 'T_ATK', 'T_ATK', 'T_WALL', 'T_CRIT', 'T_CRITDMG', 'T_REDUCE']) {
+    upMgr.upgradeTalent(tid);
+  }
+  for (const bid of ['B_TOWER', 'B_WALL', 'B_BARRICADE']) {
+    for (let i = 0; i < 4; i++) upMgr.upgradeBaseTech(bid);
+  }
+  upMgr.buyWeapon('zhuge');
+  for (const [slot, affix] of [[1, 'atk_flat'], [2, 'hero_dmg_pct'], [3, 'crit_rate'], [4, 'boss_dmg_pct']]) {
+    const g = upMgr.makeGem(slot, 3, affix);
+    upMgr.profile.gems.push(g);
+    upMgr.equipGem(g.uid);
+  }
+  const p1 = upMgr.getCombatPower();
+  assert.ok(p1 > p0 * 1.5, `强化后战力(${p1})应显著高于初始战力(${p0})`);
+
+  const clearWorld = new BattleWorld(10, upMgr.profile.heroes, upMgr.getLordBattleBonus(), { seed: 10370 });
+  for (let i = 0; i < 30 * 240 && clearWorld.phase !== 'VICTORY' && clearWorld.phase !== 'DEFEAT' && clearWorld.phase !== 'REVIVE_ASK'; i++) {
+    if (clearWorld.phase === 'ROGUE_CHOICE' && clearWorld.pendingRogueCards.length > 0) {
+      const pref = clearWorld.pendingRogueCards.findIndex((c) => c.type === 'NEW_HERO' && ['H12', 'H04', 'H02', 'H05'].includes(c.heroId || ''));
+      const newIdx = pref >= 0 ? pref : clearWorld.pendingRogueCards.findIndex((c) => c.type === 'NEW_HERO');
+      clearWorld.selectRogueCard(newIdx >= 0 ? newIdx : 0);
+    }
+    if (clearWorld.phase === 'DEPLOY_PICK') clearWorld.autoPlacePendingHero();
+    clearWorld.step(FIXED_DT);
+  }
+  assert.equal(clearWorld.phase, 'VICTORY', '强化装备与天赋后应能突破第10关卡点');
 });
