@@ -136,7 +136,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
     affixes: [
       { id: 'H05_A1', heroId: 'H05', name: '连锁雷暴', desc: '闪电链弹射次数 +3', maxStack: 2, unlockHeroLevel: 1 },
       { id: 'H05_A2', heroId: 'H05', name: '七星麻痹', desc: '落雷有 35% 概率麻痹敌军 0.8 秒', maxStack: 1, unlockHeroLevel: 1 },
-      { id: 'H05_A3', heroId: 'H05', name: '借东风', desc: '每4次攻击吹出狂风将所有敌人向后推退 80px', maxStack: 1, unlockHeroLevel: 5 },
+      { id: 'H05_A3', heroId: 'H05', name: '借东风', desc: '每4次攻击吹出狂风大幅击退所有敌人', maxStack: 1, unlockHeroLevel: 5 },
       { id: 'H05_A4', heroId: 'H05', name: '天雷感电', desc: '受雷击目标承受的所有法术伤害 +25%', maxStack: 1, unlockHeroLevel: 10 },
       { id: 'H05_SW', heroId: 'H05', name: '无双·八阵天雷阵', desc: '战场随机召唤旋转八卦雷阵高频落雷聚怪', maxStack: 1, unlockHeroLevel: 15, prereqAffixIds: ['H05_A1', 'H05_A3'], isSuperWeapon: true },
     ],
@@ -171,13 +171,13 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H08', name: '吕布', title: '无双战神', camp: '群', roleLabel: '暴击斩杀',
-    range: 240, rangeLabel: '中短', attackInterval: 1.0, canHitAir: false,
+    range: 240, rangeLabel: '短中', attackInterval: 1.0, canHitAir: false,
     dimDistance: 'melee', dimElement: 'physical', baseMultiplier: 1.8,
     skillName: '方天画戟', skillDesc: '重砸地面掀起血红冲击波，自带高暴击与低血斩杀',
     unlockType: 'SHARDS', unlockParam: 50, colorHex: '#E53935',
     affixes: [
       { id: 'H08_A1', heroId: 'H08', name: '天下无双', desc: '暴击率 +20%，暴击伤害 +50%', maxStack: 2, unlockHeroLevel: 1 },
-      { id: 'H08_A2', heroId: 'H08', name: '魔神降世', desc: '攻击范围扩至 290px，冲击波可震击空中单位', maxStack: 1, unlockHeroLevel: 1 },
+      { id: 'H08_A2', heroId: 'H08', name: '魔神降世', desc: '攻击范围大幅扩张，冲击波可震击空中单位', maxStack: 1, unlockHeroLevel: 1 },
       { id: 'H08_A3', heroId: 'H08', name: '嗜血狂斩', desc: '对血量低于 30% 的敌人伤害提升 50%', maxStack: 1, unlockHeroLevel: 5 },
       { id: 'H08_A4', heroId: 'H08', name: '画戟乱舞', desc: '攻击间隔缩短 25%', maxStack: 1, unlockHeroLevel: 10 },
       { id: 'H08_SW', heroId: 'H08', name: '无双·鬼神乱舞', desc: '每5秒释放全屏暗红戟影风暴毁灭打击', maxStack: 1, unlockHeroLevel: 15, prereqAffixIds: ['H08_A1', 'H08_A2'], isSuperWeapon: true },
@@ -220,7 +220,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
     affixes: [
       { id: 'H11_A1', heroId: 'H11', name: '木牛流马', desc: '每8秒召唤自爆木牛沿路撞击造成200%火伤', maxStack: 1, unlockHeroLevel: 1 },
       { id: 'H11_A2', heroId: 'H11', name: '八连神弩', desc: '每次连射箭矢从 3 发增至 6 发', maxStack: 2, unlockHeroLevel: 1 },
-      { id: 'H11_A3', heroId: 'H11', name: '机关过载', desc: '弩箭暴击时小幅击退目标 20px', maxStack: 1, unlockHeroLevel: 5 },
+      { id: 'H11_A3', heroId: 'H11', name: '机关过载', desc: '弩箭暴击时小幅击退敌军', maxStack: 1, unlockHeroLevel: 5 },
       { id: 'H11_A4', heroId: 'H11', name: '榴弹改装', desc: '木牛自爆后留下持续3秒燃烧火油', maxStack: 1, unlockHeroLevel: 10 },
       { id: 'H11_SW', heroId: 'H11', name: '无双·天工霹雳车', desc: '周期性向全屏最密集敌群轰炸重型爆裂火石', maxStack: 1, unlockHeroLevel: 15, prereqAffixIds: ['H11_A1', 'H11_A2'], isSuperWeapon: true },
     ],

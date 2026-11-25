@@ -28,10 +28,14 @@ import {
   createLabel,
   createModalOverlay,
   createUINode,
+  drawCardPanel,
   drawLeftAlignedBar,
   drawRoundedBox,
   hexToColor,
+  popInModal,
   showToast,
+  translateDistance,
+  translateElement,
 } from './UIFactory';
 import {
   ArtAssetManager,
@@ -54,6 +58,7 @@ interface ActiveFloat {
   node: Node;
   label: Label;
   age: number;
+  vx: number;
 }
 
 const COLOR_WHITE = new Color(255, 255, 255, 255);
@@ -141,6 +146,7 @@ export class BattleView {
   private shownPhase: string = '';
   private settled = false;
   private bossBgmOn = false;
+  private openingChoiceShown = 0;
 
   constructor(
     root: Node,
@@ -178,13 +184,14 @@ export class BattleView {
     this.root.removeAllChildren();
 
     // 战场容器：震屏只移动战场，不移动 HUD 与弹窗
-    this.field = createUINode('Field', 750, 1334, this.root, 0, 0);
+    this.field = createUINode('Field', 750, 1750, this.root, 0, 0);
     if (this.hasBg()) {
-      ArtAssetManager.createSpriteNode(this.field, stageBgKey(this.world.stage.stageId), 750, 1334, 0, 0);
+      ArtAssetManager.createSpriteNode(this.field, stageBgKey(this.world.stage.stageId), 985, 1750, 0, 0);
     }
 
     const mapNode = createUINode('MapLayer', 750, 1334, this.field, 0, 0);
     this.mapG = mapNode.addComponent(Graphics);
+    this.buildRoadAndWallArt(this.field);
 
     const entityNode = createUINode('EntityLayer', 750, 1334, this.field, 0, 0);
     this.entityG = entityNode.addComponent(Graphics);
@@ -210,6 +217,35 @@ export class BattleView {
     this.modalLayer = createUINode('ModalLayer', 750, 1334, this.root, 0, 0);
   }
 
+  private buildRoadAndWallArt(parent: Node): void {
+    const roadLayer = createUINode('RoadArtLayer', 750, 1334, parent, 0, 0);
+    if (ArtAssetManager.has('road_tile')) {
+      for (const path of this.world.stage.paths) {
+        for (let i = 0; i < path.length - 1; i++) {
+          const ax = this.toX(path[i].x), ay = this.toY(path[i].y);
+          const bx = this.toX(path[i + 1].x), by = this.toY(path[i + 1].y);
+          const dx = bx - ax, dy = by - ay;
+          const len = Math.hypot(dx, dy);
+          if (len < 1) continue;
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI - 90;
+          const segs = Math.max(1, Math.ceil(len / 56));
+          const stepLen = len / segs;
+          for (let s = 0; s < segs; s++) {
+            const t = (s + 0.5) / segs;
+            const tile = ArtAssetManager.createSpriteNode(roadLayer, 'road_tile', 58, stepLen + 14, ax + dx * t, ay + dy * t);
+            if (tile) tile.angle = angle;
+          }
+          // 拐点圆角补齐
+          const joint = ArtAssetManager.createSpriteNode(roadLayer, 'road_tile', 56, 56, bx, by);
+          if (joint) joint.angle = angle;
+        }
+      }
+    }
+    if (ArtAssetManager.has('wall_battlement')) {
+      ArtAssetManager.createSpriteNode(roadLayer, 'wall_battlement', 750, 235, 0, this.toY(WALL_Y - 75));
+    }
+  }
+
   private drawStaticMap(): void {
     const g = this.mapG;
     g.clear();
@@ -217,40 +253,42 @@ export class BattleView {
     // 若无关卡底图，填充主题色并绘制主题地貌装饰
     if (!this.hasBg()) {
       g.fillColor = hexToColor(this.world.stage.bgTheme, 255);
-      g.rect(-375, -667, 750, 1334);
+      g.rect(-375, -880, 750, 1760);
       g.fill();
       this.drawThemeDecor(g);
     }
 
-    // 本关专属曲折行军道路（阴影 + 石板边缘 + 夯土路面 + 石砖纹）
+    const hasRoadTile = ArtAssetManager.has('road_tile');
+    // 本关专属曲折行军道路（优先贴图铺设；无贴图时回退矢量绘制）
     for (const path of this.world.stage.paths) {
-      const stroke = (hex: string, alpha: number, width: number) => {
-        g.strokeColor = hexToColor(hex, alpha);
-        g.lineWidth = width;
-        g.moveTo(this.toX(path[0].x), this.toY(path[0].y));
-        for (let i = 1; i < path.length; i++) g.lineTo(this.toX(path[i].x), this.toY(path[i].y));
-        g.stroke();
-      };
-      stroke('#000000', 70, 64);
-      stroke('#4E3B31', 230, 56);
-      stroke('#B89B72', 240, 44);
-      stroke('#CDB38A', 200, 30);
+      if (!hasRoadTile) {
+        const stroke = (hex: string, alpha: number, width: number) => {
+          g.strokeColor = hexToColor(hex, alpha);
+          g.lineWidth = width;
+          g.moveTo(this.toX(path[0].x), this.toY(path[0].y));
+          for (let i = 1; i < path.length; i++) g.lineTo(this.toX(path[i].x), this.toY(path[i].y));
+          g.stroke();
+        };
+        stroke('#000000', 70, 64);
+        stroke('#4E3B31', 230, 56);
+        stroke('#B89B72', 240, 44);
+        stroke('#CDB38A', 200, 30);
 
-      // 沿路铺设石砖横纹
-      g.strokeColor = hexToColor('#8D7355', 150);
-      g.lineWidth = 2;
-      for (let i = 0; i < path.length - 1; i++) {
-        const ax = path[i].x, ay = path[i].y, bx = path[i + 1].x, by = path[i + 1].y;
-        const len = Math.hypot(bx - ax, by - ay);
-        const nx = -(by - ay) / len, ny = (bx - ax) / len;
-        for (let d = 18; d < len; d += 26) {
-          const px = ax + ((bx - ax) * d) / len;
-          const py = ay + ((by - ay) * d) / len;
-          g.moveTo(this.toX(px - nx * 18), this.toY(py - ny * 18));
-          g.lineTo(this.toX(px + nx * 18), this.toY(py + ny * 18));
+        g.strokeColor = hexToColor('#8D7355', 150);
+        g.lineWidth = 2;
+        for (let i = 0; i < path.length - 1; i++) {
+          const ax = path[i].x, ay = path[i].y, bx = path[i + 1].x, by = path[i + 1].y;
+          const len = Math.hypot(bx - ax, by - ay);
+          const nx = -(by - ay) / len, ny = (bx - ax) / len;
+          for (let d = 18; d < len; d += 26) {
+            const px = ax + ((bx - ax) * d) / len;
+            const py = ay + ((by - ay) * d) / len;
+            g.moveTo(this.toX(px - nx * 18), this.toY(py - ny * 18));
+            g.lineTo(this.toX(px + nx * 18), this.toY(py + ny * 18));
+          }
         }
+        g.stroke();
       }
-      g.stroke();
 
       // 出兵口营寨红旗标记
       const sx = this.toX(path[0].x);
@@ -263,18 +301,20 @@ export class BattleView {
       g.fill();
     }
 
-    // 底部主公城墙防线 + 城垛
-    g.fillColor = hexToColor('#3E4A52', 255);
-    g.roundRect(-375, this.toY(170), 750, this.toY(WALL_Y) - this.toY(170), 8);
-    g.fill();
-    g.fillColor = hexToColor('#546E7A', 255);
-    g.rect(-375, this.toY(WALL_Y) - 18, 750, 10);
-    g.fill();
-    g.fillColor = hexToColor('#78909C', 255);
-    for (let bx = -360; bx < 360; bx += 46) {
-      g.roundRect(bx, this.toY(WALL_Y) - 10, 30, 18, 4);
+    // 底部主公城墙防线（有贴图时由 wall_battlement 承担，无贴图时矢量兜底）
+    if (!ArtAssetManager.has('wall_battlement')) {
+      g.fillColor = hexToColor('#3E4A52', 255);
+      g.roundRect(-375, this.toY(170), 750, this.toY(WALL_Y) - this.toY(170), 8);
+      g.fill();
+      g.fillColor = hexToColor('#546E7A', 255);
+      g.rect(-375, this.toY(WALL_Y) - 18, 750, 10);
+      g.fill();
+      g.fillColor = hexToColor('#78909C', 255);
+      for (let bx = -360; bx <= 330; bx += 46) {
+        g.roundRect(bx, this.toY(WALL_Y) - 10, 30, 18, 4);
+      }
+      g.fill();
     }
-    g.fill();
 
     // 主公警戒射程弧（直观区分主公与武将防区）
     g.strokeColor = hexToColor('#FFE082', 65);
@@ -355,9 +395,13 @@ export class BattleView {
     drawLeftAlignedBar(this.barProgressFill, 332, 24, this.world.challenge ? '#FF7043' : '#4FC3F7', 8);
     this.lblProgress = createLabel(progBg, '', 18, '#FFFFFF', 0, 0, 320, 28);
 
-    this.lblTime = createLabel(hud, '00:00', 20, '#69F0AE', 255, 560, 120, 30);
+    const timeBg = createUINode('TimeBg', 112, 36, hud, 255, 560);
+    if (!ArtAssetManager.skinBar(timeBg, 112, 36)) {
+      drawRoundedBox(timeBg, 112, 36, '#140E1C', 225, 10, '#7E57C2', 1);
+    }
+    this.lblTime = createLabel(timeBg, '00:00', 20, '#FFE082', 0, 0, 104, 30, true);
 
-    const speedBtn = createButton(hud, 'x1.0\n倍速', 76, 62, '#283593', async () => {
+    const speedBtn = createButton(hud, 'x1.0\n倍速', 78, 62, '#283593', async () => {
       if (this.world.userSpeed === 1.0) {
         this.world.setUserSpeed(1.5);
         this.lblSpeed.string = 'x1.5\n倍速';
@@ -378,8 +422,8 @@ export class BattleView {
     }, -320, 465, 16);
     this.lblSpeed = speedBtn.label;
 
-    createButton(hud, '怪物\n情报', 76, 62, '#4E342E', () => this.showMonsterInfoModal(), -320, 390, 16);
-    createButton(hud, '伤害\n统计', 76, 62, '#1B5E20', () => this.showDamageStatsModal(), -320, 315, 16);
+    createButton(hud, '怪物\n情报', 78, 62, '#5E35B1', () => this.showMonsterInfoModal(), -320, 390, 16);
+    createButton(hud, '伤害\n统计', 78, 62, '#1B5E20', () => this.showDamageStatsModal(), -320, 315, 16);
 
     this.rightHeroBox = createUINode('RightHeroes', 84, 560, hud, 322, 230);
 
@@ -394,18 +438,18 @@ export class BattleView {
     this.barHpFill = createUINode('HpFill', 632, 22, hpBg, -316, 0);
     this.barHpFill.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
     drawLeftAlignedBar(this.barHpFill, 632, 22, '#66BB6A', 8);
-    this.lblWallHp = createLabel(hpBg, '', 18, '#FFFFFF', 0, 0, 300, 26);
+    this.lblWallHp = createLabel(hpBg, '', 18, '#FFFFFF', 0, 0, 300, 26, true);
 
     const expBg = createUINode('ExpBg', 640, 26, hud, 0, -585);
     drawRoundedBox(expBg, 640, 26, '#1B1325', 235, 8, '#FFD54F', 2);
     this.barExpFill = createUINode('ExpFill', 632, 18, expBg, -316, 0);
     this.barExpFill.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
     drawLeftAlignedBar(this.barExpFill, 632, 18, '#FFD54F', 6);
-    this.lblLevel = createLabel(expBg, '主公 Lv.1', 16, '#FFFFFF', 0, 0, 200, 24);
+    this.lblLevel = createLabel(expBg, '主公 Lv.1', 16, '#FFFFFF', 0, 0, 200, 24, true);
 
-    const hintBg = createUINode('HintBg', 580, 28, hud, 0, -622);
-    drawRoundedBox(hintBg, 580, 28, '#140E1C', 210, 8);
-    createLabel(hintBg, '道路外任意空地均可放置武将，战斗中可自由拖拽调阵', 16, '#FFE082', 0, 0, 560, 24);
+    const hintBg = createUINode('HintBg', 600, 32, hud, 0, -622);
+    drawRoundedBox(hintBg, 600, 32, '#140E1C', 235, 10, '#7E57C2', 1);
+    createLabel(hintBg, '道路外任意空地均可放置武将，战斗中可自由拖拽调阵', 17, '#FFE082', 0, 0, 580, 26, true);
   }
 
   private bindTouchEvents(): void {
@@ -984,15 +1028,18 @@ export class BattleView {
         lbl.enableOutline = true;
         lbl.outlineWidth = 2;
         lbl.outlineColor = new Color(30, 20, 30, 255);
-        item = { node: lbl.node, label: lbl, age: 0 };
+        item = { node: lbl.node, label: lbl, age: 0, vx: 0 };
       }
+      const lane = this.activeFloats.length % 4;
+      const dir = lane % 2 === 0 ? 1 : -1;
       item.age = 0;
+      item.vx = dir * (16 + Math.floor(lane / 2) * 14);
       item.node.active = true;
       item.label.string = ft.text;
       item.label.fontSize = Math.round(20 * ft.scale);
       item.label.lineHeight = item.label.fontSize + 6;
       item.label.color = hexToColor(ft.color);
-      item.node.setPosition(this.toX(ft.x), this.toY(ft.y), 0);
+      item.node.setPosition(this.toX(ft.x) + dir * 8, this.toY(ft.y), 0);
       this.activeFloats.push(item);
     }
     for (let i = this.activeFloats.length - 1; i >= 0; i--) {
@@ -1003,12 +1050,12 @@ export class BattleView {
         this.floatPool.push(item);
         this.activeFloats.splice(i, 1);
       } else {
-        // 弹出放大后上浮
+        // 弹出放大后横向微散上浮，避免多段跳字重叠
         const k = item.age / FLOAT_LIFE;
         const pop = k < 0.15 ? 0.7 + k * 4 : 1.3 - Math.min(0.3, (k - 0.15) * 0.6);
         item.node.setScale(pop, pop, 1);
         const p = item.node.position;
-        item.node.setPosition(p.x, p.y + 46 * dt, p.z);
+        item.node.setPosition(p.x + item.vx * dt * (1 - k * 0.6), p.y + 46 * dt, p.z);
       }
     }
   }
@@ -1083,26 +1130,33 @@ export class BattleView {
     this.rogueModal = modal;
 
     const content = createUINode('RogueContent', 720, 680, modal, 0, 20);
-    const title = this.world.currentChoiceIsOpening
-      ? '开局点将 · 选择首位武将或军策'
-      : `主公升级 Lv.${this.world.battleLevel} · 选择军策`;
-    createLabel(content, title, 30, '#FFD54F', 0, 260, 620, 44);
+    popInModal(content);
+    let title = `主公升级 Lv.${this.world.battleLevel} · 选择军策`;
+    if (this.world.currentChoiceIsOpening) {
+      this.openingChoiceShown++;
+      title = this.openingChoiceShown === 1
+        ? '开局点将 · 选择首位武将或军策'
+        : `开局加选 (${this.openingChoiceShown}) · 招募武将或强化军策`;
+    }
+    createLabel(content, title, 28, '#FFD54F', 0, 260, 640, 44, true);
 
     this.world.pendingRogueCards.forEach((card, i) => {
-      const cx = (i - 1) * 232;
-      const cardNode = createUINode(`Card_${i}`, 216, 360, content, cx, 30);
-      drawRoundedBox(cardNode, 216, 360, '#FAF5E8', 255, 16, card.isSuperWeapon ? '#FF5252' : '#7E57C2', 3);
+      const cx = (i - 1) * 234;
+      const cardNode = createUINode(`Card_${i}`, 222, 368, content, cx, 30);
+      drawCardPanel(cardNode, 222, 368, '#231836', card.isSuperWeapon ? '#FF5252' : '#FFB300', 16, 3);
 
-      createLabel(cardNode, card.tags.join(' · '), 15, '#1565C0', 0, 152, 200, 24);
+      createLabel(cardNode, card.tags.join(' · '), 15, '#80D8FF', 0, 154, 204, 24);
       const art = card.heroId ? HERO_ART_KEY_MAP[card.heroId] : card.type === 'LORD_SKILL' ? HERO_ART_KEY_MAP.LORD : undefined;
-      const hasArt = !!art && !!ArtAssetManager.createSpriteNode(cardNode, art, 96, 96, 0, 86);
-      createLabel(cardNode, card.title, 22, '#212121', 0, hasArt ? 22 : 96, 196, 32);
-      createLabel(cardNode, card.desc, 16, '#424242', 0, hasArt ? -48 : -10, 188, hasArt ? 96 : 130);
+      const hasArt = !!art && !!ArtAssetManager.createSpriteNode(cardNode, art, 96, 96, 0, 88);
+      createLabel(cardNode, card.title, 22, '#FFD54F', 0, hasArt ? 22 : 96, 202, 32, true);
+      // 去掉符号与数字间多余空格，避免 "+" 或 "%" 孤立换行
+      const cleanDesc = card.desc.replace(/\+\s+(\d+)/g, '+$1').replace(/\s+%/g, '%');
+      createLabel(cardNode, cleanDesc, 16, '#F5F5F5', 0, hasArt ? -48 : -10, 200, hasArt ? 96 : 130);
 
-      createButton(cardNode, '选择', 164, 52, '#FFB300', () => {
+      createButton(cardNode, '选择', 168, 52, '#FFB300', () => {
         AudioManager.playSfx('sfx_card');
         this.world.selectRogueCard(i);
-      }, 0, -140, 22, '#FFF59D', '#1A1426');
+      }, 0, -142, 22, '#FFF59D', '#1A1426');
     });
 
     createButton(
@@ -1115,7 +1169,7 @@ export class BattleView {
         const res = await this.adService.showRewardedAd('battle_refresh_cards');
         if (res.completed && this.world.refreshRogueCards()) this.syncUIState();
       },
-      -130, -210, 19
+      -130, -214, 19
     );
 
     createButton(
@@ -1134,14 +1188,16 @@ export class BattleView {
           showToast(this.root, '三张军策全部生效!');
         }
       },
-      130, -210, 19
+      130, -214, 19
     );
 
-    // 左下角，避开右下角的"自动"按钮
-    createButton(modal, '查看战况', 150, 50, '#37474F', () => {
+    // 透视按钮：切换时同步切换遮罩透明度，避免未透视时显得层级错乱
+    const peekBtn = createButton(modal, '查看战况', 156, 48, '#37474F', () => {
       this.peekingField = !this.peekingField;
       content.active = !this.peekingField;
-    }, -260, -490, 19);
+      peekBtn.label.string = this.peekingField ? '返回选卡' : '查看战况';
+      drawRoundedBox(modal, 750, 1750, '#090710', this.peekingField ? 20 : 185, 0);
+    }, -258, -488, 18);
   }
 
   private updateDeployTip(): void {
@@ -1149,9 +1205,10 @@ export class BattleView {
     const hero = this.world.pendingHeroToPlace;
     if (!hero) return;
 
-    const tip = createUINode('DeployTip', 680, 114, this.modalLayer, 0, 440);
+    // 放在城防防线上方空区，完全避开左侧倍速/怪物情报按钮与上方出怪道
+    const tip = createUINode('DeployTip', 680, 108, this.modalLayer, 0, -390);
     this.deployTipNode = tip;
-    drawRoundedBox(tip, 680, 114, '#1B1325', 235, 16, hero.colorHex, 2);
+    drawCardPanel(tip, 680, 108, '#1B1325', hero.colorHex, 16, 2);
 
     let msg = `点击战场任意非道路空地预览【${hero.name}】(${hero.rangeLabel}射程/${hero.canHitAir ? '可对空' : '仅地面'})`;
     let validPreview = false;
@@ -1159,10 +1216,10 @@ export class BattleView {
       const check = this.world.isPositionValidForDeploy(this.previewPos.x, this.previewPos.y);
       validPreview = check.valid;
       msg = check.valid
-        ? `已预览 ${hero.name} (射程:${hero.range}px)，点击"确认上阵"或再点该处！`
+        ? `已预览 ${hero.name}，点击“确认上阵”或再次点击该处落位`
         : `不可放置：${check.reason}，请点选道路外空地`;
     }
-    createLabel(tip, msg, 17, validPreview ? '#69F0AE' : '#FFE082', 0, 24, 640, 32);
+    createLabel(tip, msg, 17, validPreview ? '#69F0AE' : '#FFE082', 0, 24, 640, 32, true);
 
     if (validPreview && this.previewPos) {
       const px = this.previewPos.x;
@@ -1173,44 +1230,58 @@ export class BattleView {
           this.previewPos = null;
           AudioManager.playSfx('sfx_deploy');
         } else showToast(this.root, res.reason || '不可放置');
-      }, -120, -24, 19);
+      }, -120, -22, 19);
     }
 
     createButton(tip, '智能推荐布阵', 210, 44, '#1565C0', () => {
       this.world.autoPlacePendingHero();
       this.previewPos = null;
       AudioManager.playSfx('sfx_deploy');
-    }, validPreview ? 120 : 0, -24, 19);
+    }, validPreview ? 120 : 0, -22, 19);
   }
 
   private showMonsterInfoModal(): void {
     const wasPlaying = this.world.phase === 'PLAYING';
     if (wasPlaying) this.world.togglePause();
 
-    const mask = createModalOverlay(this.modalLayer);
-    const box = createUINode('MInfo', 640, 620, mask, 0, 0);
-    drawRoundedBox(box, 640, 620, '#221833', 255, 18, '#FFD54F', 2);
-    ArtAssetManager.skinPanel(box, 640, 620);
-    createLabel(box, `第 ${this.world.stage.stageId} 关 · 敌军情报`, 28, '#FFD54F', 0, 268, 500, 38);
-
     const uniq = Array.from(new Set(this.world.stage.waves.map((w) => w.monsterId)));
+    const boxH = Math.min(820, Math.max(440, 210 + uniq.length * 82 + (this.world.challenge ? 60 : 0)));
+    const mask = createModalOverlay(this.modalLayer);
+    const box = createUINode('MInfo', 640, boxH, mask, 0, 0);
+    drawRoundedBox(box, 640, boxH, '#221833', 255, 18, '#FFD54F', 2);
+    ArtAssetManager.skinPanel(box, 640, boxH);
+    popInModal(box);
+    createLabel(box, `第 ${this.world.stage.stageId} 关 · 敌军情报`, 28, '#FFD54F', 0, boxH / 2 - 46, 500, 38, true);
+
     uniq.forEach((mid, i) => {
       const m = MONSTER_CONFIGS[mid];
       if (!m) return;
-      const y = 190 - i * 76;
-      ArtAssetManager.createSpriteNode(box, MONSTER_ART_KEY_MAP[mid], 64, 64, -265, y);
-      const hint = m.bossMechanic || (m.space === 'air' ? '空中单位(需对空)' : m.weakElement ? `弱点:${m.weakElement}` : m.weakDistance ? `弱点:${m.weakDistance}` : '常规兵种');
-      createLabel(box, `${m.name} (${m.isBoss ? '首领' : '小怪'}) — ${hint}`, 18, m.isBoss ? '#FF8A80' : '#E0E0E0', 35, y, 520, 60);
+      const y = boxH / 2 - 120 - i * 80;
+      const row = createUINode(`MRow_${i}`, 576, 68, box, 0, y);
+      drawCardPanel(row, 576, 68, '#1B1326', m.isBoss ? '#FF5252' : '#5E35B1', 10, 1);
+      ArtAssetManager.createSpriteNode(row, MONSTER_ART_KEY_MAP[mid], 56, 56, -246, 0);
+      const hint = m.bossMechanic
+        || (m.space === 'air'
+          ? '空中单位（需可对空武将）'
+          : m.weakElement
+            ? `弱点：${translateElement(m.weakElement)}`
+            : m.weakDistance
+              ? `弱点：${translateDistance(m.weakDistance)}`
+              : '常规兵种');
+      const titleLbl = createLabel(row, `${m.name} (${m.isBoss ? '首领' : '小怪'})`, 19, m.isBoss ? '#FF8A80' : '#FFD54F', 34, 14, 480, 26, true);
+      titleLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
+      const descLbl = createLabel(row, hint, 16, '#E0E0E0', 34, -14, 480, 24);
+      descLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
     });
     if (this.world.challenge) {
       const names = Object.values(ELITE_AFFIXES).map((e) => `${e.name}:${e.desc}`).join('  ');
-      createLabel(box, `挑战精英词缀  ${names}`, 15, '#FF8A65', 0, -205, 600, 50);
+      createLabel(box, `挑战精英词缀  ${names}`, 15, '#FF8A65', 0, -boxH / 2 + 108, 580, 44);
     }
 
-    createButton(box, '返回战场', 200, 54, '#5E35B1', () => {
+    createButton(box, '关闭', 200, 54, '#5E35B1', () => {
       mask.destroy();
       if (wasPlaying) this.world.togglePause();
-    }, 0, -262, 22);
+    }, 0, -boxH / 2 + 48, 22);
   }
 
   private showDamageStatsModal(): void {
@@ -1218,28 +1289,38 @@ export class BattleView {
     if (wasPlaying) this.world.togglePause();
 
     const mask = createModalOverlay(this.modalLayer);
-    const box = createUINode('DmgBox', 600, 600, mask, 0, 0);
-    drawRoundedBox(box, 600, 600, '#221833', 255, 18, '#69F0AE', 2);
-    ArtAssetManager.skinPanel(box, 600, 600);
-    createLabel(box, '实时伤害统计 (DPS)', 28, '#69F0AE', 0, 255, 480, 38);
+    const box = createUINode('DmgBox', 620, 620, mask, 0, 0);
+    drawRoundedBox(box, 620, 620, '#221833', 255, 18, '#69F0AE', 2);
+    ArtAssetManager.skinPanel(box, 620, 620);
+    popInModal(box);
+    createLabel(box, '实时伤害统计 (DPS)', 28, '#69F0AE', 0, 262, 480, 38, true);
 
-    const entries = Object.entries(this.world.damageStats).sort((a, b) => b[1] - a[1]);
+    const entries = Object.entries(this.world.damageStats)
+      .filter(([, dmg]) => dmg > 0)
+      .sort((a, b) => b[1] - a[1]);
     const total = Math.max(1, entries.reduce((s, e) => s + e[1], 0));
     const secs = Math.max(1, this.world.elapsed);
-    entries.slice(0, 8).forEach(([id, dmg], i) => {
-      const name = id === 'LORD' ? '主公(连弩)' : id === 'TOWER' ? '城防箭塔' : (getHeroConfig(id)?.name || id);
-      const pct = dmg / total;
-      const y = 180 - i * 52;
-      createLabel(box, `${name}  ${dmg} (${Math.round(pct * 100)}%)  DPS ${Math.round(dmg / secs)}`, 18, '#FFFFFF', 0, y + 10, 520, 26);
-      const bar = createUINode('Bar', 500, 8, box, -250, y - 12);
-      bar.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
-      drawLeftAlignedBar(bar, Math.max(4, 500 * pct), 8, id === 'LORD' ? '#FFD54F' : '#69F0AE', 4);
-    });
+    if (entries.length === 0) {
+      createLabel(box, '暂无伤害记录，敌军进入防区后开始统计', 20, '#B0BEC5', 0, 20, 520, 36);
+    } else {
+      entries.slice(0, 8).forEach(([id, dmg], i) => {
+        const name = id === 'LORD' ? '主公(连弩)' : id === 'TOWER' ? '城防箭塔' : (getHeroConfig(id)?.name || id);
+        const pct = dmg / total;
+        const y = 186 - i * 52;
+        const txt = createLabel(box, `${name}   ${dmg} (${Math.round(pct * 100)}%)   DPS ${Math.round(dmg / secs)}`, 18, '#FFFFFF', 0, y + 12, 520, 26, true);
+        txt.horizontalAlign = Label.HorizontalAlign.LEFT;
+        const barBg = createUINode('BarBg', 520, 12, box, 0, y - 12);
+        drawRoundedBox(barBg, 520, 12, '#140E1C', 235, 6, '#455A64', 1);
+        const bar = createUINode('Bar', 512, 8, barBg, -256, 0);
+        bar.getComponent(UITransform)!.setAnchorPoint(0, 0.5);
+        drawLeftAlignedBar(bar, Math.max(6, 512 * pct), 8, id === 'LORD' ? '#FFD54F' : '#69F0AE', 4);
+      });
+    }
 
     createButton(box, '关闭', 200, 54, '#5E35B1', () => {
       mask.destroy();
       if (wasPlaying) this.world.togglePause();
-    }, 0, -250, 22);
+    }, 0, -258, 22);
   }
 
   private showPauseModal(): void {

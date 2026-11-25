@@ -49,13 +49,13 @@ export class MockShopService implements IShopService {
 
   public getProducts(): ShopProduct[] {
     return [
-      { id: 'monthly_card', name: '主公尊享月卡', priceYuan: 30, desc: '每日领取100元宝+免激励视频特权(二期开放)' },
-      { id: 'first_charge', name: '首充无双礼包', priceYuan: 6, desc: '即得吕布将魂x50+传说宝石(二期开放)' },
-      { id: 'diamond_648', name: '6480元宝军饷', priceYuan: 648, desc: '商城充值预留档位(二期开放)' },
+      { id: 'monthly_card', name: '主公尊享月卡', priceYuan: 30, desc: '每日领取100元宝+免激励视频特权' },
+      { id: 'first_charge', name: '首充无双礼包', priceYuan: 6, desc: '即得吕布将魂×50+传说宝石' },
+      { id: 'diamond_648', name: '6480元宝军饷', priceYuan: 648, desc: '超值元宝军饷补给' },
     ];
   }
 
   public async purchase(_productId: string): Promise<{ ok: boolean; msg: string }> {
-    return { ok: false, msg: '商城与支付系统将在二期商业化版本开放' };
+    return { ok: false, msg: '充值通道即将开放，敬请期待' };
   }
 }

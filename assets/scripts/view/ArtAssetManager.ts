@@ -1,7 +1,15 @@
-import { assetManager, AssetManager, ImageAsset, Node, resources, Sprite, SpriteFrame } from 'cc';
-import { createUINode } from './UIFactory';
+import { assetManager, AssetManager, ImageAsset, Layers, Node, resources, Sprite, SpriteFrame, UITransform } from 'cc';
 
-// 首包（resources/art）：大厅与第 1 关立即可用的少量核心素材
+function makeSpriteUINode(name: string, w: number, h: number, parent?: Node, x = 0, y = 0): Node {
+  const node = new Node(name);
+  node.layer = Layers.Enum.UI_2D;
+  node.addComponent(UITransform).setContentSize(w, h);
+  node.setPosition(x, y, 0);
+  if (parent) parent.addChild(node);
+  return node;
+}
+
+// 首包（resources/art）：大厅与第 1 关立即可用的核心素材 + 全界面通用商业化九宫格 UI / 图标
 const CORE_KEYS = [
   'hero_lord',
   'hero_zhaoyun',
@@ -12,12 +20,37 @@ const CORE_KEYS = [
   'bg_hall',
   'ui_panel',
   'ui_button',
+  'ui_btn_green',
+  'ui_btn_blue',
+  'ui_btn_red',
+  'ui_btn_purple',
+  'ui_btn_gray',
+  'ui_card',
+  'ui_bar_bg',
+  'wall_battlement',
+  'road_tile',
+  'icon_chest',
+  'icon_forge',
+  'icon_refine',
+  'icon_diamond',
+  'icon_gold',
+  'icon_stamina',
+  'icon_equip',
+  'icon_weapon',
+  'icon_shield',
 ];
 
-// 九宫格切片边距（源图像素）：角花不被拉伸
+// 九宫格切片边距（源图像素）：角花与金边不被拉伸
 const SLICE_INSETS: Record<string, [number, number, number, number]> = {
   ui_panel: [64, 64, 64, 64],
-  ui_button: [40, 30, 40, 30],
+  ui_button: [40, 26, 40, 26],
+  ui_btn_green: [40, 26, 40, 26],
+  ui_btn_blue: [40, 26, 40, 26],
+  ui_btn_red: [40, 26, 40, 26],
+  ui_btn_purple: [40, 26, 40, 26],
+  ui_btn_gray: [40, 26, 40, 26],
+  ui_card: [14, 14, 14, 14],
+  ui_bar_bg: [14, 12, 14, 12],
 };
 
 // 分包（bundles/art_battle，微信子包）：其余武将、兵种、Boss、关卡背景与特效贴图
@@ -150,7 +183,7 @@ class ArtAssetManagerImpl {
   public createSpriteNode(parent: Node, key: string | undefined, w: number, h: number, x = 0, y = 0): Node | null {
     const sf = this.getSpriteFrame(key);
     if (!sf || !key) return null;
-    const node = createUINode(`Sp_${key}`, w, h, parent, x, y);
+    const node = makeSpriteUINode(`Sp_${key}`, w, h, parent, x, y);
     const sp = node.addComponent(Sprite);
     sp.sizeMode = Sprite.SizeMode.CUSTOM;
     sp.spriteFrame = sf;
@@ -161,6 +194,43 @@ class ArtAssetManagerImpl {
   public skinPanel(node: Node, w: number, h: number): void {
     const sp = this.createSpriteNode(node, 'ui_panel', w + 16, h + 16, 0, 0);
     if (sp) sp.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+  }
+
+  public pickButtonSkin(bgHex: string): string {
+    const hex = bgHex.toUpperCase();
+    if (hex.includes('FFB3') || hex.includes('F9A8') || hex.includes('F57F') || hex.includes('FF8F') || hex.includes('EF6C')) return 'ui_button';
+    if (hex.includes('2E7D') || hex.includes('388E') || hex.includes('43A0') || hex.includes('1B5E')) return 'ui_btn_green';
+    if (hex.includes('C628') || hex.includes('D843') || hex.includes('B71C')) return 'ui_btn_red';
+    if (hex.includes('1565') || hex.includes('2835') || hex.includes('3949') || hex.includes('0083') || hex.includes('1E88')) return 'ui_btn_blue';
+    if (hex.includes('546E') || hex.includes('455A') || hex.includes('3747') || hex.includes('4242')) return 'ui_btn_gray';
+    return 'ui_btn_purple';
+  }
+
+  public skinButton(node: Node, w: number, h: number, bgHex: string): boolean {
+    const key = this.pickButtonSkin(bgHex);
+    const sf = this.getSpriteFrame(key);
+    if (!sf) return false;
+    const spNode = this.createSpriteNode(node, key, w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinCard(node: Node, w: number, h: number): boolean {
+    const spNode = this.createSpriteNode(node, 'ui_card', w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinBar(node: Node, w: number, h: number): boolean {
+    const spNode = this.createSpriteNode(node, 'ui_bar_bg', w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
   }
 }
 

@@ -30,7 +30,7 @@
 
 | 位置 | 加载时机 | 内容 | 体积 |
 | --- | --- | --- | --- |
-| `assets/resources/art/`（首包） | 启动 `loadCore()` | hero_lord、hero_zhaoyun、hero_huangzhong、monster_yellow、boss_zhangbao、bg_stage1、bg_hall、ui_panel、ui_button | ≈350KB |
+| `assets/resources/art/`（首包） | 启动 `loadCore()` | hero_lord、hero_zhaoyun、hero_huangzhong、monster_yellow、boss_zhangbao、bg_stage1、bg_hall、wall_battlement、road_tile、ui_panel、ui_button、ui_btn_green/blue/red/purple/gray、ui_card、ui_bar_bg、9 个 icon_* | ≈598KB |
 | `assets/bundles/art_battle/`（微信子包） | 启动 0.5s 后 / 进战斗前 `loadBattle()` | 其余 10 武将、7 兵种、9 Boss、bg_stage2~10、9 个特效 | ≈1.6MB |
 
 `art_battle` 与 `audio` 目录的 `.meta` 设置 `isBundle: true`、`bundleConfigID: "subpackage"`，对应 `settings/v2/packages/builder.json` 中的自定义 Bundle 配置（微信平台 = 子包）。若编辑器未识别，在「项目设置 → Bundle 配置」中新建同名配置并将 wechatgame 压缩类型设为「小游戏分包」即可。
@@ -104,12 +104,22 @@
 
 `lightning_chain`、`slash_arc` 两类保留 Graphics 程序化绘制（线条类特效用贴图效果反而差）。
 
-### 4.5 UI
+### 4.5 UI 与商业化控件（含地形贴图）
 
 | Key | 尺寸 | 九宫格 inset (L,T,R,B) | 用途 |
 | --- | --- | --- | --- |
 | ui_panel | 256×255 | 64,64,64,64 | 全部弹窗底板（`ArtAssetManager.skinPanel`） |
-| ui_button | 320×92 | 40,30,40,30 | 大厅主按钮「开始战斗」 |
+| ui_button | 320×92 | 40,30,40,30 | 大厅主按钮「开始战斗」（金框橙底） |
+| ui_btn_green | 320×92 | 40,30,40,30 | 确认 / 购买 / 强化 / 开始类按钮 |
+| ui_btn_blue | 320×92 | 40,30,40,30 | 信息 / 跳转 / 次级操作按钮 |
+| ui_btn_red | 320×92 | 40,30,40,30 | 关闭 / 撤退 / 危险操作按钮 |
+| ui_btn_purple | 320×92 | 40,30,40,30 | 神兵 / 宝箱 / 稀有高亮按钮 |
+| ui_btn_gray | 320×92 | 40,30,40,30 | 不可负担 / 锁定 / 置灰态按钮 |
+| ui_card | 256×255 | 36,36,36,36 | 通用卡片 / 装备格 / 底部导航栏底板 |
+| ui_bar_bg | 256×64 | 20,16,20,16 | 顶部数值条 / 提示条 / 进度槽背景 |
+| wall_battlement | 750×285 | — | 主城与战场底部城墙女墙贴图 |
+| road_tile | 128×128 | — | 战场行军土路平铺贴图 |
+| icon_chest / icon_forge / icon_refine / icon_diamond / icon_gold / icon_stamina / icon_equip / icon_weapon / icon_shield | 96×96 | — | 商业化货币、宝箱、神兵、装备、强化、精炼、城防图标 |
 
 ## 5. 新增/替换素材流程
 
