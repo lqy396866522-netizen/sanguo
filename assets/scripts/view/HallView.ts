@@ -218,7 +218,7 @@ export class HallView {
       this.showPatrolModal();
     }, -250, -250, 20, '#81C784');
 
-    const unlockedStage = stage.stageId <= p.maxClearedStage + 1;
+    const unlockedStage = true; // 测试期暂时放开前置关卡限制，正式上线恢复 stage.stageId <= p.maxClearedStage + 1
     const cost = this.challengeMode ? CHALLENGE_RULES.staminaCost : stage.costStamina;
     const startBtn = createButton(
       this.root,
