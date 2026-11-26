@@ -1,4 +1,4 @@
-import { assetManager, AssetManager, Color, ImageAsset, Layers, Material, Node, resources, Sprite, SpriteFrame, UITransform } from 'cc';
+import { assetManager, AssetManager, Color, ImageAsset, Layers, Material, Node, Rect, resources, Sprite, SpriteFrame, UITransform } from 'cc';
 import { setSpriteAdditive } from '../fx/Blend';
 
 function makeSpriteUINode(name: string, w: number, h: number, parent?: Node, x = 0, y = 0): Node {
@@ -55,6 +55,7 @@ const CORE_KEYS = [
   'rays_star',
   'fx_dot',
   'fx_ring',
+  'vfx_ice_arrows',
   'wall_battlement',
   'road_tile',
   'icon_chest',
@@ -140,6 +141,7 @@ export const VFX_ART_KEY_MAP: Record<string, string> = {
   charm_ring: 'vfx_charm',
   heal_wall: 'vfx_heal',
   wind_push: 'vfx_wind',
+  ice_arrows: 'vfx_ice_arrows',
 };
 
 export function stageBgKey(stageId: number): string {
@@ -159,6 +161,7 @@ function battleBundleKeys(): string[] {
 
 class ArtAssetManagerImpl {
   private cache: Map<string, SpriteFrame> = new Map();
+  private sheetCache: Map<string, SpriteFrame[]> = new Map();
   private hitFlashMaterial: Material | null = null;
   private corePromise: Promise<void> | null = null;
   private battlePromise: Promise<void> | null = null;
@@ -231,6 +234,26 @@ class ArtAssetManagerImpl {
 
   public getSpriteFrame(key: string | undefined): SpriteFrame | null {
     return (key && this.cache.get(key)) || null;
+  }
+
+  public getSheetFrames(key: string, cols: number): SpriteFrame[] {
+    const cacheKey = `${key}_${cols}`;
+    const hit = this.sheetCache.get(cacheKey);
+    if (hit) return hit;
+    const base = this.cache.get(key);
+    if (!base || !base.texture || cols <= 0) return [];
+    const rect = base.rect;
+    const fw = Math.floor(rect.width / cols);
+    const fh = rect.height;
+    const list: SpriteFrame[] = [];
+    for (let i = 0; i < cols; i++) {
+      const sf = new SpriteFrame();
+      sf.texture = base.texture;
+      sf.rect = new Rect(rect.x + i * fw, rect.y, fw, fh);
+      list.push(sf);
+    }
+    this.sheetCache.set(cacheKey, list);
+    return list;
   }
 
   public createSpriteNode(parent: Node, key: string | undefined, w: number, h: number, x = 0, y = 0): Node | null {

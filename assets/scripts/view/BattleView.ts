@@ -7,6 +7,7 @@ import {
   UIOpacity,
   Vec3,
   Sprite,
+  SpriteFrame,
   Color,
   tween,
   Tween,
@@ -70,6 +71,7 @@ interface ActiveVfx {
   sprite?: Node;
   opacity?: UIOpacity;
   spriteKey?: string;
+  frames?: SpriteFrame[];
 }
 
 interface ActiveFloat {
@@ -95,12 +97,13 @@ const VFX_SFX: Partial<Record<BattleVfxEvent['type'], SfxKey>> = {
   wooden_ox_boom: 'sfx_explosion',
   lightning_chain: 'sfx_thunder',
   ice_nova: 'sfx_ice',
+  ice_arrows: 'sfx_ice',
   heal_wall: 'sfx_heal',
 };
 
 // 圆形贴图特效：随寿命放大并淡出（基础直径 = 半径 * 2）
 const SPRITE_VFX_TYPES = new Set<BattleVfxEvent['type']>([
-  'fire_zone', 'ice_nova', 'poison_swamp', 'halberd_smash', 'wooden_ox_boom', 'hit_spark', 'charm_ring', 'heal_wall', 'wind_push',
+  'fire_zone', 'ice_nova', 'poison_swamp', 'halberd_smash', 'wooden_ox_boom', 'hit_spark', 'charm_ring', 'heal_wall', 'wind_push', 'ice_arrows',
 ]);
 
 function lerp(a: number, b: number, t: number): number {
@@ -891,14 +894,26 @@ export class BattleView {
     const item: ActiveVfx = { ev, age: 0 };
     const key = VFX_ART_KEY_MAP[ev.type];
     if (SPRITE_VFX_TYPES.has(ev.type) && key && ArtAssetManager.has(key) && this.activeVfxs.length < 60) {
-      const d = ev.type === 'hit_spark' ? 56 : (ev.radius || 60) * 2;
-      const node = this.acquireSprite(key, d, d);
+      const isIceArrows = ev.type === 'ice_arrows';
+      const frames = isIceArrows ? ArtAssetManager.getSheetFrames(key, 8) : undefined;
+      const w = isIceArrows ? 192 : (ev.type === 'hit_spark' ? 56 : (ev.radius || 60) * 2);
+      const h = isIceArrows ? 216 : w;
+      const node = this.acquireSprite(key, w, h);
       if (node) {
         node.setParent(this.vfxSpriteLayer);
         item.sprite = node;
         item.spriteKey = key;
+        item.frames = frames;
         item.opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
-        node.setPosition(this.toX(ev.x), this.toY(ev.y), 0);
+        node.setPosition(this.toX(ev.x), this.toY(ev.y) + (isIceArrows ? 52 : 0), 0);
+        if (isIceArrows) {
+          const sp = node.getComponent(Sprite);
+          if (sp) {
+            if (frames && frames.length > 0) sp.spriteFrame = frames[0];
+            ArtAssetManager.setAdditive(sp);
+            sp.color = COLOR_WHITE;
+          }
+        }
         if (ev.type === 'hit_spark' && ev.tx !== undefined && ev.ty !== undefined) {
           node.angle = (Math.atan2(ev.ty - ev.y, ev.tx - ev.x) * 180) / Math.PI;
         } else {
@@ -920,9 +935,17 @@ export class BattleView {
       const y = this.toY(ev.y);
 
       if (item.sprite && item.opacity) {
-        const grow = ev.type === 'hit_spark' ? 0.7 + 0.6 * k : 0.75 + 0.35 * k;
-        item.sprite.setScale(grow, grow, 1);
-        item.opacity.opacity = Math.round(255 * (1 - k * k));
+        if (item.frames && item.frames.length > 0) {
+          const idx = Math.min(item.frames.length - 1, Math.floor(Math.max(0, k) * item.frames.length));
+          const sp = item.sprite.getComponent(Sprite);
+          if (sp && sp.spriteFrame !== item.frames[idx]) sp.spriteFrame = item.frames[idx];
+          item.sprite.setScale(1, 1, 1);
+          item.opacity.opacity = k > 0.8 ? Math.round(255 * Math.max(0, 1 - (k - 0.8) / 0.2)) : 255;
+        } else {
+          const grow = ev.type === 'hit_spark' ? 0.7 + 0.6 * k : 0.75 + 0.35 * k;
+          item.sprite.setScale(grow, grow, 1);
+          item.opacity.opacity = Math.round(255 * (1 - k * k));
+        }
         continue;
       }
 

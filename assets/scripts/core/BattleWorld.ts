@@ -826,6 +826,7 @@ export class BattleWorld {
         cur = this.findNearestTarget(cur.x, cur.y, 190, true, hit);
       }
       this.vfxEvents.push({ type: 'lightning_chain', x: hero.x, y: hero.y, points: pts, color: '#B388FF', duration: 0.25 });
+      this.vfxEvents.push({ type: 'ice_arrows', x: target.x, y: target.y, radius: 110, color: '#80D8FF', duration: 0.45 });
 
       if (af['H05_A3'] && hero.attackCount % 4 === 0) {
         this.vfxEvents.push({ type: 'wind_push', x: 375, y: 650, radius: 340, color: '#69F0AE', duration: 0.35 });

@@ -267,7 +267,8 @@ export interface BattleVfxEvent {
     | 'heal_wall'
     | 'wooden_ox_boom'
     | 'poison_swamp'
-    | 'hit_spark';
+    | 'hit_spark'
+    | 'ice_arrows';
   x: number;
   y: number;
   tx?: number;
