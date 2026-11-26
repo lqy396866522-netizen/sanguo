@@ -33,7 +33,7 @@
 
 | 位置 | 加载时机 | 内容 | 体积 |
 | --- | --- | --- | --- |
-| `assets/resources/art/`（首包） | 启动 `loadCore()` | hero_lord、hero_zhaoyun、hero_huangzhong、monster_yellow、boss_zhangbao、bg_stage1、bg_hall、wall_battlement、road_tile、ui_panel、ui_button、ui_btn_green/blue/red/purple/gray、ui_card、ui_bar_bg、9 个 icon_* | ≈598KB |
+| `assets/resources/art/`（首包） | 启动 `loadCore()` | hero_lord、hero_zhaoyun、hero_huangzhong、monster_yellow、boss_zhangbao、bg_stage1、bg_hall、bg_shop、bg_lord、bg_forge、ui_panel、ui_panel_cloud、ui_banner_eave、ui_card_wood、ui_card_red_vip、ui_btn_c_*、tab_q_*、商城立体图标与常用小图标、vfx_ice_arrows | ≈694KB |
 | `assets/bundles/art_battle/`（微信子包） | 启动 0.5s 后 / 进战斗前 `loadBattle()` | 其余 10 武将、7 兵种、9 Boss、bg_stage2~10、9 个特效 | ≈1.6MB |
 
 `art_battle` 与 `audio` 目录的 `.meta` 设置 `isBundle: true`、`bundleConfigID: "subpackage"`，对应 `settings/v2/packages/builder.json` 中的自定义 Bundle 配置（微信平台 = 子包）。若编辑器未识别，在「项目设置 → Bundle 配置」中新建同名配置并将 wechatgame 压缩类型设为「小游戏分包」即可。
@@ -113,11 +113,14 @@
 | --- | --- | --- | --- |
 | ui_panel | 256×255 | 64,64,64,64 | 全部弹窗底板（`ArtAssetManager.skinPanel`） |
 | ui_button | 320×92 | 40,30,40,30 | 大厅主按钮「开始战斗」（金框橙底） |
-| ui_btn_green | 320×92 | 40,30,40,30 | 确认 / 购买 / 强化 / 开始类按钮 |
-| ui_btn_blue | 320×92 | 40,30,40,30 | 信息 / 跳转 / 次级操作按钮 |
-| ui_btn_red | 320×92 | 40,30,40,30 | 关闭 / 撤退 / 危险操作按钮 |
-| ui_btn_purple | 320×92 | 40,30,40,30 | 神兵 / 宝箱 / 稀有高亮按钮 |
-| ui_btn_gray | 320×92 | 40,30,40,30 | 不可负担 / 锁定 / 置灰态按钮 |
+| ui_btn_green / blue / red / purple / gray | 320×92 | 40,30,40,30 | 通用确认/信息/关闭/稀有/置灰态按钮 |
+| ui_btn_c_gold / brown / green / blue / red | 240×86 | 34,24,34,24 | Q 版高光软倒角卡通厚涂立体按钮 |
+| ui_panel_cloud | 220×220 | 44,44,44,44 | 主公装备页圆角暖木纹流云金边九宫格面板 |
+| ui_card_wood / ui_card_red_vip | 280×100 | 32,26,32,26 | 军需商城暖棕木纹商品卡 / 暗红金角特权卡 |
+| ui_banner_eave | 620×130 | — | 军需商城顶部双龙飞檐木雕无字横幅 |
+| bg_shop / bg_lord | 540×960 | — | 军需账房底图 / 主公暖木流云底图 |
+| tab_q_shop / lord / battle / hero / base | 96×96 | — | 全局底部 5 页签 Q 版饱满大图标 |
+| icon_chest_gold / forge_ore / refine_crystal / gem_pouch / stamina_bag / crossbow_gift / treasure_pile / ingot_tray / ingot / coin_s | 96×96 | — | 军需商城立体厚涂道具与嵌币价签图标 |
 | ui_card | 256×255 | 36,36,36,36 | 通用卡片 / 装备格 / 底部导航栏底板 |
 | ui_bar_bg | 256×64 | 20,16,20,16 | 顶部数值条 / 提示条 / 进度槽背景 |
 | wall_battlement | 750×285 | — | 主城与战场底部城墙女墙贴图 |

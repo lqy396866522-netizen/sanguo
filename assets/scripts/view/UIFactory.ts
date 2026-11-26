@@ -180,6 +180,57 @@ export function drawCardPanel(
   return drawRoundedBox(node, w, h, fillHex, 240, radius, borderHex, borderWidth);
 }
 
+export function drawCloudPanel(
+  node: Node,
+  w: number,
+  h: number,
+  fillHex = '#4E3728',
+  borderHex = '#E5B454',
+  radius = 18
+): Graphics {
+  if (ArtAssetManager.skinCloudPanel(node, w, h)) {
+    const g = node.getComponent(Graphics) || node.addComponent(Graphics);
+    g.clear();
+    return g;
+  }
+  return drawRoundedBox(node, w, h, fillHex, 245, radius, borderHex, 2);
+}
+
+export function drawWoodCard(
+  node: Node,
+  w: number,
+  h: number,
+  dimmed = false,
+  fillHex = '#452E22',
+  borderHex = '#C89B42'
+): Graphics {
+  if (ArtAssetManager.skinWoodCard(node, w, h)) {
+    const g = node.getComponent(Graphics) || node.addComponent(Graphics);
+    g.clear();
+    if (dimmed) {
+      const sp = node.getChildByName('Sp_ui_card_wood')?.getComponent(Sprite);
+      if (sp) sp.color = new Color(130, 126, 132, 240);
+    }
+    return g;
+  }
+  return drawRoundedBox(node, w, h, fillHex, 242, 14, borderHex, 2);
+}
+
+export function drawRedVipCard(
+  node: Node,
+  w: number,
+  h: number,
+  fillHex = '#611D22',
+  borderHex = '#E5B454'
+): Graphics {
+  if (ArtAssetManager.skinRedVipCard(node, w, h)) {
+    const g = node.getComponent(Graphics) || node.addComponent(Graphics);
+    g.clear();
+    return g;
+  }
+  return drawRoundedBox(node, w, h, fillHex, 245, 14, borderHex, 2);
+}
+
 export function createButton(
   parent: Node,
   text: string,
@@ -205,7 +256,8 @@ export function createButton(
     AudioManager.playSfx('sfx_click');
     onClick();
   });
-  const useDark = textColor.toUpperCase() === '#1A1426' || textColor.toUpperCase() === '#212121';
+  const c = hexToColor(textColor);
+  const useDark = (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) < 130;
   const label = createLabel(node, text, fontSize, textColor, 0, 0, Math.max(24, w - 18), Math.max(20, h - 10), !useDark);
   return { node, label };
 }
@@ -629,35 +681,41 @@ export function playFadeFromBlack(root: Node, time = 0.3): void {
   tween(op).to(time, { opacity: 0 }).call(() => { if (cover.isValid) cover.destroy(); }).start();
 }
 
-// 全屏统一商业化底部导航栏（y = -585，严格处于750x1334安全区内）
+// 全屏统一 Q 版暖木流云底部导航栏（y = -595，严格处于750x1334安全区内）
 export function renderBottomNavBar(
   parent: Node,
   active: 'shop' | 'lord' | 'hall' | 'hero' | 'base',
-  onSwitch: (tab: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => void
+  onSwitch: (tab: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => void,
+  badges?: Partial<Record<'shop' | 'lord' | 'hall' | 'hero' | 'base', boolean>>
 ): void {
-  const bar = createUINode('BottomNavBar', 750, 114, parent, 0, -595);
-  drawRoundedBox(bar, 750, 114, '#14101C', 248, 0, '#C89B42', 2);
+  const bar = createUINode('BottomNavBar', 750, 118, parent, 0, -595);
+  drawRoundedBox(bar, 750, 118, '#281C15', 250, 0, '#D4A548', 2);
 
-  const items: { key: 'shop' | 'lord' | 'hall' | 'hero' | 'base'; label: string; icon: string }[] = [
-    { key: 'shop', label: '军需', icon: 'tab_shop' },
-    { key: 'lord', label: '主公', icon: 'tab_lord' },
-    { key: 'hall', label: '征战', icon: 'tab_battle' },
-    { key: 'hero', label: '武将', icon: 'tab_hero' },
-    { key: 'base', label: '城防', icon: 'tab_base' },
+  const items: { key: 'shop' | 'lord' | 'hall' | 'hero' | 'base'; label: string; icon: string; fallbackIcon: string }[] = [
+    { key: 'shop', label: '军需', icon: 'tab_q_shop', fallbackIcon: 'tab_shop' },
+    { key: 'lord', label: '主公', icon: 'tab_q_lord', fallbackIcon: 'tab_lord' },
+    { key: 'hall', label: '征战', icon: 'tab_q_battle', fallbackIcon: 'tab_battle' },
+    { key: 'hero', label: '武将', icon: 'tab_q_hero', fallbackIcon: 'tab_hero' },
+    { key: 'base', label: '城防', icon: 'tab_q_base', fallbackIcon: 'tab_base' },
   ];
 
   items.forEach((it, idx) => {
     const x = -292 + idx * 146;
     const isAct = it.key === active;
-    const cell = createUINode(`Tab_${it.key}`, 136, 98, bar, x, 2);
+    const cell = createUINode(`Tab_${it.key}`, 136, 102, bar, x, isAct ? 4 : 0);
     if (isAct) {
-      const hiBg = createUINode('HiBg', 134, 96, cell, 0, 0);
-      drawRoundedBox(hiBg, 134, 96, '#3B2C16', 240, 14, '#FFD54F', 2);
+      const hiBg = createUINode('HiBg', 136, 102, cell, 0, 0);
+      if (!ArtAssetManager.skinCloudPanel(hiBg, 136, 102)) {
+        drawRoundedBox(hiBg, 136, 102, '#5C3D1E', 248, 16, '#FFD54F', 2);
+      } else {
+        const sp = hiBg.getChildByName('Sp_ui_panel_cloud')?.getComponent(Sprite);
+        if (sp) sp.color = new Color(255, 224, 150, 255);
+      }
       const op = hiBg.addComponent(UIOpacity);
-      op.opacity = 120;
+      op.opacity = 160;
       tween(op).to(0.18, { opacity: 255 }).start();
     } else {
-      drawRoundedBox(cell, 130, 90, '#1D1828', 210, 12, '#4A3B26', 1);
+      drawRoundedBox(cell, 128, 92, '#35251C', 220, 14, '#705236', 1);
     }
     const btn = cell.addComponent(Button);
     btn.transition = Button.Transition.NONE;
@@ -666,11 +724,17 @@ export function renderBottomNavBar(
       AudioManager.playSfx('sfx_click');
       onSwitch(it.key);
     });
-    const iconSp = ArtAssetManager.createSpriteNode(cell, it.icon, 42, 42, 0, 14);
+    const iconKey = ArtAssetManager.has(it.icon) ? it.icon : it.fallbackIcon;
+    const iconSp = ArtAssetManager.createSpriteNode(cell, iconKey, 48, 48, 0, 14);
     if (iconSp && isAct) {
       iconSp.setScale(1, 1, 1);
-      tween(iconSp).to(0.18, { scale: new Vec3(1.15, 1.15, 1), position: new Vec3(0, 20, 0) }, { easing: 'backOut' }).start();
+      tween(iconSp).to(0.18, { scale: new Vec3(1.16, 1.16, 1), position: new Vec3(0, 20, 0) }, { easing: 'backOut' }).start();
     }
-    createLabel(cell, it.label, isAct ? 21 : 19, isAct ? '#FFD54F' : '#D7CCC8', 0, -26, 120, 26, true);
+    createLabel(cell, it.label, isAct ? 21 : 19, isAct ? '#FFE57F' : '#EFE0CE', 0, -28, 120, 26, true);
+    if (badges && badges[it.key] && !isAct) {
+      const dot = createUINode('TabDot', 15, 15, cell, 46, 36);
+      drawRoundedBox(dot, 15, 15, '#E53935', 255, 7, '#FFD54F', 1);
+      attachIdleBreath(dot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3, randomDelay: idx * 0.5 });
+    }
   });
 }

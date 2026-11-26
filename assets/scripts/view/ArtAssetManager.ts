@@ -20,7 +20,11 @@ const CORE_KEYS = [
   'bg_stage1',
   'bg_hall',
   'bg_forge',
+  'bg_shop',
+  'bg_lord',
   'ui_panel',
+  'ui_panel_cloud',
+  'ui_banner_eave',
   'ui_button',
   'ui_btn_gold',
   'ui_btn_green',
@@ -28,7 +32,14 @@ const CORE_KEYS = [
   'ui_btn_red',
   'ui_btn_purple',
   'ui_btn_gray',
+  'ui_btn_c_gold',
+  'ui_btn_c_brown',
+  'ui_btn_c_green',
+  'ui_btn_c_blue',
+  'ui_btn_c_red',
   'ui_card',
+  'ui_card_wood',
+  'ui_card_red_vip',
   'ui_parchment',
   'ui_bar_bg',
   'cell_q1',
@@ -50,6 +61,11 @@ const CORE_KEYS = [
   'tab_battle',
   'tab_hero',
   'tab_base',
+  'tab_q_shop',
+  'tab_q_lord',
+  'tab_q_battle',
+  'tab_q_hero',
+  'tab_q_base',
   'shine_bar',
   'glow_circle',
   'rays_star',
@@ -59,8 +75,18 @@ const CORE_KEYS = [
   'wall_battlement',
   'road_tile',
   'icon_chest',
+  'icon_chest_gold',
   'icon_forge',
+  'icon_forge_ore',
   'icon_refine',
+  'icon_refine_crystal',
+  'icon_gem_pouch',
+  'icon_stamina_bag',
+  'icon_crossbow_gift',
+  'icon_treasure_pile',
+  'icon_ingot_tray',
+  'icon_ingot',
+  'icon_coin_s',
   'icon_diamond',
   'icon_gold',
   'icon_stamina',
@@ -72,6 +98,9 @@ const CORE_KEYS = [
 // 九宫格切片边距（源图像素）：角花与金边不被拉伸
 const SLICE_INSETS: Record<string, [number, number, number, number]> = {
   ui_panel: [24, 24, 24, 24],
+  ui_panel_cloud: [44, 44, 44, 44],
+  ui_card_wood: [32, 26, 32, 26],
+  ui_card_red_vip: [34, 28, 34, 28],
   ui_button: [20, 16, 20, 16],
   ui_btn_gold: [20, 16, 20, 16],
   ui_btn_green: [20, 16, 20, 16],
@@ -79,6 +108,11 @@ const SLICE_INSETS: Record<string, [number, number, number, number]> = {
   ui_btn_red: [20, 16, 20, 16],
   ui_btn_purple: [20, 16, 20, 16],
   ui_btn_gray: [20, 16, 20, 16],
+  ui_btn_c_gold: [28, 18, 28, 18],
+  ui_btn_c_brown: [28, 18, 28, 18],
+  ui_btn_c_green: [28, 18, 28, 18],
+  ui_btn_c_blue: [28, 18, 28, 18],
+  ui_btn_c_red: [28, 18, 28, 18],
   ui_card: [14, 14, 14, 14],
   ui_parchment: [18, 18, 18, 18],
   ui_bar_bg: [12, 8, 12, 8],
@@ -296,11 +330,23 @@ class ArtAssetManagerImpl {
 
   public pickButtonSkin(bgHex: string): string {
     const hex = bgHex.toUpperCase();
-    if (hex.includes('FFB3') || hex.includes('F9A8') || hex.includes('F57F') || hex.includes('FF8F') || hex.includes('EF6C')) return 'ui_button';
-    if (hex.includes('2E7D') || hex.includes('388E') || hex.includes('43A0') || hex.includes('1B5E')) return 'ui_btn_green';
-    if (hex.includes('C628') || hex.includes('D843') || hex.includes('B71C')) return 'ui_btn_red';
-    if (hex.includes('1565') || hex.includes('2835') || hex.includes('3949') || hex.includes('0083') || hex.includes('1E88')) return 'ui_btn_blue';
+    const hasCartoon = !!this.getSpriteFrame('ui_btn_c_gold');
+    if (hex.includes('FFB3') || hex.includes('F9A8') || hex.includes('F57F') || hex.includes('FF8F') || hex.includes('EF6C')) {
+      return hasCartoon ? 'ui_btn_c_gold' : 'ui_button';
+    }
+    if (hex.includes('2E7D') || hex.includes('388E') || hex.includes('43A0') || hex.includes('1B5E')) {
+      return this.getSpriteFrame('ui_btn_c_green') ? 'ui_btn_c_green' : 'ui_btn_green';
+    }
+    if (hex.includes('C628') || hex.includes('D843') || hex.includes('B71C')) {
+      return this.getSpriteFrame('ui_btn_c_red') ? 'ui_btn_c_red' : 'ui_btn_red';
+    }
+    if (hex.includes('1565') || hex.includes('2835') || hex.includes('3949') || hex.includes('0083') || hex.includes('1E88')) {
+      return this.getSpriteFrame('ui_btn_c_blue') ? 'ui_btn_c_blue' : 'ui_btn_blue';
+    }
     if (hex.includes('546E') || hex.includes('455A') || hex.includes('3747') || hex.includes('4242')) return 'ui_btn_gray';
+    if (hex.includes('6D4C') || hex.includes('5D40') || hex.includes('4E34') || hex.includes('2620')) {
+      return this.getSpriteFrame('ui_btn_c_brown') ? 'ui_btn_c_brown' : 'ui_btn_purple';
+    }
     return 'ui_btn_purple';
   }
 
@@ -342,6 +388,30 @@ class ArtAssetManagerImpl {
 
   public skinParchment(node: Node, w: number, h: number): boolean {
     const spNode = this.createSpriteNode(node, 'ui_parchment', w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinCloudPanel(node: Node, w: number, h: number): boolean {
+    const spNode = this.createSpriteNode(node, 'ui_panel_cloud', w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinWoodCard(node: Node, w: number, h: number): boolean {
+    const spNode = this.createSpriteNode(node, 'ui_card_wood', w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinRedVipCard(node: Node, w: number, h: number): boolean {
+    const spNode = this.createSpriteNode(node, 'ui_card_red_vip', w, h, 0, 0);
     if (!spNode) return false;
     spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
     spNode.setSiblingIndex(0);

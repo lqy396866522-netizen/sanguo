@@ -36,6 +36,7 @@ import { AudioManager } from './AudioManager';
 export interface HallCallbacks {
   onStartBattle: (stageId: number, challenge: boolean) => void;
   onSwitchTab: (tab: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => void;
+  getBadges?: () => Partial<Record<'shop' | 'lord' | 'hall' | 'hero' | 'base', boolean>>;
 }
 
 export class HallView {
@@ -356,7 +357,7 @@ export class HallView {
     }
 
     // 8. 统一底部导航栏
-    renderBottomNavBar(this.root, 'hall', (tab) => this.callbacks.onSwitchTab(tab));
+    renderBottomNavBar(this.root, 'hall', (tab) => this.callbacks.onSwitchTab(tab), this.callbacks.getBadges?.());
   }
 
   private showPatrolModal(): void {
