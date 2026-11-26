@@ -1,4 +1,5 @@
-import { assetManager, AssetManager, ImageAsset, Layers, Node, resources, Sprite, SpriteFrame, UITransform } from 'cc';
+import { assetManager, AssetManager, Color, ImageAsset, Layers, Material, Node, resources, Sprite, SpriteFrame, UITransform } from 'cc';
+import { setSpriteAdditive } from '../fx/Blend';
 
 function makeSpriteUINode(name: string, w: number, h: number, parent?: Node, x = 0, y = 0): Node {
   const node = new Node(name);
@@ -18,15 +19,42 @@ const CORE_KEYS = [
   'boss_zhangbao',
   'bg_stage1',
   'bg_hall',
+  'bg_forge',
   'ui_panel',
   'ui_button',
+  'ui_btn_gold',
   'ui_btn_green',
   'ui_btn_blue',
   'ui_btn_red',
   'ui_btn_purple',
   'ui_btn_gray',
   'ui_card',
+  'ui_parchment',
   'ui_bar_bg',
+  'cell_q1',
+  'cell_q2',
+  'cell_q3',
+  'cell_q4',
+  'cell_q5',
+  'cell_q6',
+  'eq_1',
+  'eq_2',
+  'eq_3',
+  'eq_4',
+  'eq_5',
+  'eq_6',
+  'gem_hex',
+  'icon_talisman',
+  'tab_shop',
+  'tab_lord',
+  'tab_battle',
+  'tab_hero',
+  'tab_base',
+  'shine_bar',
+  'glow_circle',
+  'rays_star',
+  'fx_dot',
+  'fx_ring',
   'wall_battlement',
   'road_tile',
   'icon_chest',
@@ -42,15 +70,23 @@ const CORE_KEYS = [
 
 // 九宫格切片边距（源图像素）：角花与金边不被拉伸
 const SLICE_INSETS: Record<string, [number, number, number, number]> = {
-  ui_panel: [64, 64, 64, 64],
-  ui_button: [40, 26, 40, 26],
-  ui_btn_green: [40, 26, 40, 26],
-  ui_btn_blue: [40, 26, 40, 26],
-  ui_btn_red: [40, 26, 40, 26],
-  ui_btn_purple: [40, 26, 40, 26],
-  ui_btn_gray: [40, 26, 40, 26],
+  ui_panel: [24, 24, 24, 24],
+  ui_button: [20, 16, 20, 16],
+  ui_btn_gold: [20, 16, 20, 16],
+  ui_btn_green: [20, 16, 20, 16],
+  ui_btn_blue: [20, 16, 20, 16],
+  ui_btn_red: [20, 16, 20, 16],
+  ui_btn_purple: [20, 16, 20, 16],
+  ui_btn_gray: [20, 16, 20, 16],
   ui_card: [14, 14, 14, 14],
-  ui_bar_bg: [14, 12, 14, 12],
+  ui_parchment: [18, 18, 18, 18],
+  ui_bar_bg: [12, 8, 12, 8],
+  cell_q1: [14, 14, 14, 14],
+  cell_q2: [14, 14, 14, 14],
+  cell_q3: [14, 14, 14, 14],
+  cell_q4: [14, 14, 14, 14],
+  cell_q5: [14, 14, 14, 14],
+  cell_q6: [14, 14, 14, 14],
 };
 
 // 分包（bundles/art_battle，微信子包）：其余武将、兵种、Boss、关卡背景与特效贴图
@@ -123,8 +159,22 @@ function battleBundleKeys(): string[] {
 
 class ArtAssetManagerImpl {
   private cache: Map<string, SpriteFrame> = new Map();
+  private hitFlashMaterial: Material | null = null;
   private corePromise: Promise<void> | null = null;
   private battlePromise: Promise<void> | null = null;
+
+  private loadHitFlashMaterial(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      resources.load('effects/hit-flash', Material, (err, mat) => {
+        if (!err && mat) this.hitFlashMaterial = mat;
+        resolve();
+      });
+    });
+  }
+
+  public getHitFlashMaterial(): Material | null {
+    return this.hitFlashMaterial;
+  }
 
   private loadFrom(bundle: AssetManager.Bundle, path: string, key: string): Promise<void> {
     return new Promise<void>((resolve) => {
@@ -147,7 +197,10 @@ class ArtAssetManagerImpl {
 
   public loadCore(): Promise<void> {
     if (!this.corePromise) {
-      this.corePromise = Promise.all(CORE_KEYS.map((k) => this.loadFrom(resources, `art/${k}`, k))).then(() => undefined);
+      this.corePromise = Promise.all([
+        ...CORE_KEYS.map((k) => this.loadFrom(resources, `art/${k}`, k)),
+        this.loadHitFlashMaterial(),
+      ]).then(() => undefined);
     }
     return this.corePromise;
   }
@@ -190,6 +243,28 @@ class ArtAssetManagerImpl {
     return node;
   }
 
+  // 动效贴图（扫光/光晕/射线/光点）：纯白 RGBA 素材 + Sprite.color 着色 + ADD 混合，叠在深色底上才会发亮
+  public setAdditive(sp: Sprite): void {
+    setSpriteAdditive(sp, true);
+  }
+
+  public createFxNode(
+    parent: Node,
+    key: string,
+    w: number,
+    h: number,
+    x = 0,
+    y = 0,
+    color?: Color
+  ): Node | null {
+    const node = this.createSpriteNode(parent, key, w, h, x, y);
+    if (!node) return null;
+    const sp = node.getComponent(Sprite)!;
+    this.setAdditive(sp);
+    if (color) sp.color = color;
+    return node;
+  }
+
   // 给已用 Graphics 画好底框的弹窗叠一层九宫格面板皮肤；须在添加文字/按钮之前调用
   public skinPanel(node: Node, w: number, h: number): void {
     const sp = this.createSpriteNode(node, 'ui_panel', w + 16, h + 16, 0, 0);
@@ -227,6 +302,23 @@ class ArtAssetManagerImpl {
 
   public skinBar(node: Node, w: number, h: number): boolean {
     const spNode = this.createSpriteNode(node, 'ui_bar_bg', w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinQualityCell(node: Node, quality: number, w: number, h: number): boolean {
+    const q = Math.max(1, Math.min(6, quality || 1));
+    const spNode = this.createSpriteNode(node, `cell_q${q}`, w, h, 0, 0);
+    if (!spNode) return false;
+    spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
+    spNode.setSiblingIndex(0);
+    return true;
+  }
+
+  public skinParchment(node: Node, w: number, h: number): boolean {
+    const spNode = this.createSpriteNode(node, 'ui_parchment', w, h, 0, 0);
     if (!spNode) return false;
     spNode.getComponent(Sprite)!.type = Sprite.Type.SLICED;
     spNode.setSiblingIndex(0);

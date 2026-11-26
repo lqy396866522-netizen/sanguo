@@ -288,7 +288,7 @@ test('7. 前50关专属曲折地图、随机坑位与任意空地自由放置/�
   }
 });
 
-test('8. 第3关无宝石开局防死锁与主公/武将黄金伤害比例回归测试', () => {
+test('8. 纯辅助主公(0攻击)+开局必出武将+第3关无宝石开局防死锁测试', () => {
   const heroSaves = {
     H01: { heroId: 'H01', unlocked: true, level: 1, shards: 0 },
     H02: { heroId: 'H02', unlocked: true, level: 1, shards: 0 },
@@ -298,30 +298,18 @@ test('8. 第3关无宝石开局防死锁与主公/武将黄金伤害比例回归
     maxWallHp: 3200,
     critRate: 0.08,
     globalCritDmgBonus: 0.02,
-    gemEffects: {}, // 模拟完全不镶嵌开局宝石
+    gemEffects: {},
   };
 
-  // 1) 无开局宝石也应天生送1次免费点将三选一
+  // 1) 无开局宝石也应天生送1次免费点将三选一，且0武将时全为 NEW_HERO
   const worldCheck = new BattleWorld(3, heroSaves, zeroGemBonus);
-  assert.equal(worldCheck.phase, 'ROGUE_CHOICE', '每局开局必须默认赠送1次免费三选一防止0武将死锁');
+  assert.equal(worldCheck.phase, 'ROGUE_CHOICE', '每局开局必须默认赠送1次免费三选一');
+  assert.ok(
+    worldCheck.pendingRogueCards.length > 0 && worldCheck.pendingRogueCards.every((c) => c.type === 'NEW_HERO'),
+    '0武将开局时首次三选一必须全部为新武将招募卡'
+  );
 
-  // 2) 模拟纯主公（不上阵武将，跳过开局三选一选主公技能）打第3关前45秒：必须能击杀>=3名敌军并至少升1级
-  const soloLord = new BattleWorld(3, heroSaves, zeroGemBonus);
-  const lordCardIdx = soloLord.pendingRogueCards.findIndex((c) => c.type === 'LORD_SKILL');
-  if (lordCardIdx >= 0) soloLord.selectRogueCard(lordCardIdx);
-  else { soloLord.phase = 'PLAYING'; soloLord.pendingRogueCards = []; }
-
-  for (let i = 0; i < 45 * 30; i++) {
-    if (soloLord.phase === 'ROGUE_CHOICE') {
-      const idx = soloLord.pendingRogueCards.findIndex((c) => c.type === 'LORD_SKILL');
-      soloLord.selectRogueCard(idx >= 0 ? idx : 0);
-      if (soloLord.phase === 'DEPLOY_PICK') soloLord.autoPlacePendingHero();
-    }
-    soloLord.fixedTick(FIXED_DT);
-  }
-  assert.ok(soloLord.kills >= 3 && soloLord.battleLevel >= 2, `纯主公第3关45秒应至少击杀3怪且升级(当前kills=${soloLord.kills}, lv=${soloLord.battleLevel})`);
-
-  // 3) 正常上阵武将打第3关60秒：武将输出占比必须 > 50%
+  // 2) 正常上阵武将打第3关60秒：主公伤害恒为0，全军输出由武将承担且能击杀升级
   const normalWorld = new BattleWorld(3, heroSaves, zeroGemBonus);
   normalWorld.autoMode = true;
   if (normalWorld.phase === 'ROGUE_CHOICE') normalWorld.selectRogueCard(0);
@@ -336,5 +324,84 @@ test('8. 第3关无宝石开局防死锁与主公/武将黄金伤害比例回归
   for (const [k, v] of Object.entries(normalWorld.damageStats)) {
     if (k !== 'LORD') hDmg += v;
   }
-  assert.ok(hDmg / (lDmg + hDmg) > 0.5, `第3关正常布阵武将伤害占比(${((hDmg / (lDmg + hDmg)) * 100).toFixed(1)}%)应高于50%`);
+  assert.equal(lDmg, 0, '主公纯辅佐不直接攻击，伤害必须为 0');
+  assert.ok(hDmg > 0 && normalWorld.kills >= 3 && normalWorld.battleLevel >= 2, `武将应独立击杀升级(kills=${normalWorld.kills}, lv=${normalWorld.battleLevel})`);
+});
+
+test('8b. v3.0 空装开局、首通2装备、6件套共鸣、升品/分解、5宝石互斥与兵符系统测试', async () => {
+  const { LocalRepository } = await import('../assets/scripts/data/LocalRepository.ts');
+  const { PlayerDataManager } = await import('../assets/scripts/data/PlayerDataManager.ts');
+  const mem = new Map();
+  const repo = new LocalRepository({
+    getItem: (k) => mem.get(k) ?? null,
+    setItem: (k, v) => mem.set(k, v),
+  });
+  const mgr = new PlayerDataManager(repo);
+
+  // 1) 开局所有装备槽为空，背包为空
+  for (let s = 1; s <= 6; s++) {
+    assert.equal(mgr.profile.equipSlots[s].equipQuality, 0);
+    assert.equal(mgr.profile.equipSlots[s].equippedUid, null);
+  }
+  assert.equal((mgr.profile.equipBag || []).length, 0);
+
+  // 2) 第1关首通必掉2件不同部位装备并自动穿戴
+  const reward = { gold: 200, diamond: 30, forgeStone: 5, refineStone: 2, exp: 140, shardHeroId: 'H01', shardCount: 4 };
+  mgr.applyBattleSettle(1, 3, reward);
+  assert.equal((reward.newEquips || []).length, 2, '第1关首通必掉2件装备');
+  assert.notEqual(reward.newEquips[0].slotType, reward.newEquips[1].slotType);
+
+  // 3) 穿齐6件装备激活最低品质套装伤害加成
+  for (let s = 1; s <= 6; s++) {
+    if (mgr.profile.equipSlots[s].equipQuality === 0) {
+      const eq = mgr.makeEquipItem(s, 1, 2);
+      mgr.profile.equipBag.push(eq);
+      mgr.equipItem(eq.uid);
+    }
+  }
+  const setStatus = mgr.getEquipSetStatus();
+  assert.equal(setStatus.active, true);
+  assert.equal(setStatus.minQuality, 2);
+  assert.equal(setStatus.bonusPct, 10);
+
+  // 4) 升品与一键分解
+  mgr.profile.gold += 5000;
+  mgr.profile.forgeStone += 100;
+  mgr.profile.refineStone += 50;
+  const promoRes = mgr.promoteEquipQuality(1);
+  assert.equal(promoRes.ok, true);
+  assert.equal(mgr.profile.equipSlots[1].equipQuality, 3);
+
+  const extraEq = mgr.makeEquipItem(2, 1, 1);
+  mgr.profile.equipBag.push(extraEq);
+  const decRes = mgr.decomposeEquip(extraEq.uid);
+  assert.equal(decRes.ok, true);
+  assert.ok(decRes.forgeStone > 0 && decRes.gold > 0);
+
+  // 5) 5孔宝石功效不可重复
+  const g1 = mgr.makeGem(4, 2, 'lord_pierce');
+  const g2 = mgr.makeGem(4, 3, 'lord_pierce');
+  mgr.profile.gems.push(g1, g2);
+  assert.equal(mgr.equipGem(g1.uid).ok, true);
+  const dupRes = mgr.equipGem(g2.uid);
+  assert.equal(dupRes.ok, false, '同部位不可镶嵌两颗相同功效的宝石');
+
+  // 6) 兵符解锁、升级到3级激活被动、最多佩戴2枚
+  mgr.profile.diamond += 3000;
+  mgr.profile.forgeStone += 100;
+  mgr.profile.maxClearedStage = 10;
+  assert.equal(mgr.unlockOrUpgradeTalisman('T_TIGER').ok, true);
+  assert.equal(mgr.unlockOrUpgradeTalisman('T_PHOENIX').ok, true);
+  assert.equal(mgr.unlockOrUpgradeTalisman('T_TORTOISE').ok, true);
+  // 最多2枚
+  const eq3 = mgr.equipTalisman('T_TORTOISE');
+  assert.equal(eq3.ok, false);
+  // 升级朱雀至3级激活开局额外三选一
+  mgr.unlockOrUpgradeTalisman('T_PHOENIX');
+  mgr.unlockOrUpgradeTalisman('T_PHOENIX');
+  const tEff = mgr.getTalismanEffects();
+  assert.equal(tEff.startRogueExtra, 1);
+  const bonus = mgr.getLordBattleBonus();
+  assert.equal(bonus.setDamageBonusPct, 10);
+  assert.equal(bonus.talismanEffects.startRogueExtra, 1);
 });

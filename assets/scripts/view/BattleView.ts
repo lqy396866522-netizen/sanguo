@@ -8,6 +8,8 @@ import {
   Vec3,
   Sprite,
   Color,
+  tween,
+  Tween,
 } from 'cc';
 import {
   BARRICADE_DEPTH,
@@ -24,6 +26,10 @@ import type { BattleReport, BattleVfxEvent } from '../core/types.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
 import type { IAdService } from '../sdk/MockServices.ts';
 import {
+  attachGlowPulse,
+  attachHitFlash,
+  attachIdleBreath,
+  attachSpinLoop,
   createButton,
   createLabel,
   createModalOverlay,
@@ -32,11 +38,23 @@ import {
   drawLeftAlignedBar,
   drawRoundedBox,
   hexToColor,
+  playBurstParticles,
+  playGlowRing,
   popInModal,
   showToast,
   translateDistance,
   translateElement,
 } from './UIFactory';
+import {
+  BreathMode,
+  FloatStyle,
+  FloatText,
+  FxPool,
+  HitFlash,
+  HitStop,
+  ScreenShake,
+  FxTag,
+} from '../fx';
 import {
   ArtAssetManager,
   HERO_ART_KEY_MAP,
@@ -109,11 +127,8 @@ export class BattleView {
   // 精灵节点：武将常驻，怪物与特效走按贴图 key 分组的对象池
   private lordSpriteNode: Node | null = null;
   private heroSpriteMap: Map<string, Node> = new Map();
-  private monsterSpriteMap: Map<number, { node: Node; key: string }> = new Map();
+  private monsterSpriteMap: Map<number, { node: Node; key: string; prevHitTimer: number }> = new Map();
   private spritePool: Map<string, Node[]> = new Map();
-  private floatPool: ActiveFloat[] = [];
-  private shakeAmp = 0;
-  private shakeT = 0;
   private occupiedSlots: Set<number> = new Set();
   private lastHeroCount = -1;
 
@@ -142,11 +157,13 @@ export class BattleView {
   private draggingHeroId: string | null = null;
   private dragPos: { x: number; y: number } | null = null;
   private activeVfxs: ActiveVfx[] = [];
-  private activeFloats: ActiveFloat[] = [];
   private shownPhase: string = '';
   private settled = false;
   private bossBgmOn = false;
   private openingChoiceShown = 0;
+  private lastWaveShown = 0;
+  private hitVignette: Node | null = null;
+  private coinPopActive = 0;
 
   constructor(
     root: Node,
@@ -183,8 +200,11 @@ export class BattleView {
   private buildLayers(): void {
     this.root.removeAllChildren();
 
-    // 战场容器：震屏只移动战场，不移动 HUD 与弹窗
+    // 战场容器：挂载 ScreenShake 震屏组件，只震动战场不移动 HUD 与弹窗
     this.field = createUINode('Field', 750, 1750, this.root, 0, 0);
+    this.field.addComponent(ScreenShake);
+    FloatText.warmup(16);
+    FxPool.warmup(20);
     if (this.hasBg()) {
       ArtAssetManager.createSpriteNode(this.field, stageBgKey(this.world.stage.stageId), 985, 1750, 0, 0);
     }
@@ -200,6 +220,10 @@ export class BattleView {
     this.lordSpriteNode = ArtAssetManager.createSpriteNode(
       this.spriteLayer, HERO_ART_KEY_MAP.LORD, 92, 92, this.toX(LORD_POS.x), this.toY(LORD_POS.y + 8)
     );
+    if (this.lordSpriteNode) {
+      attachGlowPulse(this.spriteLayer, 128, '#FFD54F', this.toX(LORD_POS.x), this.toY(LORD_POS.y + 8), true, { minOpacity: 60, maxOpacity: 150, scaleAmp: 0.08 });
+      attachIdleBreath(this.lordSpriteNode, { mode: BreathMode.Scale, amp: 0.015, period: 1.8 });
+    }
 
     this.vfxSpriteLayer = createUINode('VfxSpriteLayer', 750, 1334, this.field, 0, 0);
     const vfxNode = createUINode('VfxLayer', 750, 1334, this.field, 0, 0);
@@ -316,10 +340,10 @@ export class BattleView {
       g.fill();
     }
 
-    // 主公警戒射程弧（直观区分主公与武将防区）
-    g.strokeColor = hexToColor('#FFE082', 65);
+    // 主公统帅光环（替代原射程圈，主公纯坐镇指挥不直接攻击）
+    g.strokeColor = hexToColor('#FFD54F', 95);
     g.lineWidth = 2;
-    g.circle(this.toX(LORD_POS.x), this.toY(LORD_POS.y), LORD_RANGE);
+    g.circle(this.toX(LORD_POS.x), this.toY(LORD_POS.y), 74);
     g.stroke();
 
     // 城防基地：拒马区（墙前斜木桩）与两端箭塔
@@ -537,12 +561,17 @@ export class BattleView {
   }
 
   public update(dt: number): void {
+    const scaledDt = Math.min(dt, 0.05) * HitStop.scale;
     const prevWall = this.world.wallHp;
     const prevLordAnim = this.world.lordAttackAnimTimer;
-    this.world.step(dt);
+    this.world.step(scaledDt);
 
     if (this.world.lordAttackAnimTimer > prevLordAnim) AudioManager.playSfx('sfx_crossbow');
-    if (this.world.wallHp < prevWall) AudioManager.playSfx('sfx_wall_hit');
+    if (this.world.wallHp < prevWall) {
+      AudioManager.playSfx('sfx_wall_hit');
+      this.flashWallHit(prevWall - this.world.wallHp);
+    }
+    this.checkWaveBanner();
     if (!this.bossBgmOn && this.world.bossSpawned) {
       this.bossBgmOn = true;
       AudioManager.playBgm('bgm_boss');
@@ -554,18 +583,24 @@ export class BattleView {
     }
     for (let i = this.activeVfxs.length - 1; i >= 0; i--) {
       const item = this.activeVfxs[i];
-      item.age += dt;
+      item.age += scaledDt;
       if (item.age >= item.ev.duration) {
         if (item.sprite && item.spriteKey) this.releaseSprite(item.spriteKey, item.sprite);
         this.activeVfxs.splice(i, 1);
       }
     }
 
-    this.updateShake(dt);
+    if (this.world.shakeRequest > 0) {
+      const amp = this.world.shakeRequest;
+      this.world.shakeRequest = 0;
+      ScreenShake.play(amp, amp >= 7 ? 0.25 : 0.14);
+      if (amp >= 5) HitStop.trigger(amp >= 7 ? 0.08 : 0.05);
+    }
+
     this.renderEntities();
     this.renderVfx();
     this.renderDragAndRange();
-    this.renderFloatTexts(dt);
+    this.renderFloatTexts();
     this.syncHUD();
 
     if (this.world.deployedHeroes.size !== this.lastHeroCount) {
@@ -601,21 +636,6 @@ export class BattleView {
       this.spritePool.set(key, pool);
     }
     pool.push(node);
-  }
-
-  private updateShake(dt: number): void {
-    if (this.world.shakeRequest > 0) {
-      this.shakeAmp = Math.max(this.shakeAmp, this.world.shakeRequest);
-      this.world.shakeRequest = 0;
-    }
-    if (this.shakeAmp > 0.2) {
-      this.shakeT += dt * 60;
-      this.field.setPosition(Math.sin(this.shakeT * 1.7) * this.shakeAmp, Math.cos(this.shakeT * 2.3) * this.shakeAmp * 0.6, 0);
-      this.shakeAmp *= Math.pow(0.0015, dt);
-    } else if (this.shakeAmp > 0) {
-      this.shakeAmp = 0;
-      this.field.setPosition(0, 0, 0);
-    }
   }
 
   private renderEntities(): void {
@@ -780,7 +800,8 @@ export class BattleView {
         const size = m.config.isBoss ? 110 : 60;
         const node = this.acquireSprite(key, size, size);
         if (node) {
-          entry = { node, key };
+          attachHitFlash(node);
+          entry = { node, key, prevHitTimer: 0 };
           this.monsterSpriteMap.set(m.uid, entry);
         }
       }
@@ -789,8 +810,10 @@ export class BattleView {
         const bob = isAir ? Math.sin(now * 5 + m.uid) * 5 : Math.abs(Math.sin(now * 9 + m.uid)) * 3;
         entry.node.setPosition(mx, my + bob, 0);
         const hit = m.hitFlashTimer > 0;
-        const squash = m.hitStopTimer > 0 ? 0.08 : hit ? 0.05 : 0;
-        entry.node.setScale(1 + squash, 1 - squash, 1);
+        if (m.hitFlashTimer > entry.prevHitTimer) {
+          entry.node.getComponent(HitFlash)?.play();
+        }
+        entry.prevHitTimer = m.hitFlashTimer;
         const sp = entry.node.getComponent(Sprite);
         if (sp) sp.color = hit ? COLOR_HIT : m.freezeTimer > 0 ? COLOR_FREEZE : COLOR_WHITE;
         if (hit) {
@@ -838,7 +861,7 @@ export class BattleView {
 
     for (const [uid, entry] of this.monsterSpriteMap.entries()) {
       if (!alive.has(uid)) {
-        this.releaseSprite(entry.key, entry.node);
+        this.playEnemyDeath(entry.node, entry.key);
         this.monsterSpriteMap.delete(uid);
       }
     }
@@ -1018,45 +1041,130 @@ export class BattleView {
     }
   }
 
-  private renderFloatTexts(dt: number): void {
+  private renderFloatTexts(): void {
+    const tf = this.floatLayer.getComponent(UITransform);
     while (this.world.floatTexts.length > 0) {
       const ft = this.world.floatTexts.shift()!;
-      if (this.activeFloats.length >= MAX_FLOATS) continue;
-      let item = this.floatPool.pop();
-      if (!item) {
-        const lbl = createLabel(this.floatLayer, '', 20, '#FFFFFF', 0, 0, 160, 30);
-        lbl.enableOutline = true;
-        lbl.outlineWidth = 2;
-        lbl.outlineColor = new Color(30, 20, 30, 255);
-        item = { node: lbl.node, label: lbl, age: 0, vx: 0 };
+      const localPos = new Vec3(this.toX(ft.x), this.toY(ft.y), 0);
+      const worldPos = tf ? tf.convertToWorldSpaceAR(localPos) : this.floatLayer.worldPosition.clone();
+      let style = FloatStyle.normal;
+      if (ft.text.startsWith('暴')) {
+        style = FloatStyle.crit;
+        ScreenShake.play(4, 0.12);
+      } else if (ft.color === '#69F0AE' || ft.color === '#81C784') {
+        style = FloatStyle.heal;
+      } else if (ft.text.includes('禁锢') || ft.text.includes('免疫') || ft.text.includes('反震')) {
+        style = FloatStyle.warn;
+      } else if (ft.scale >= 1.05) {
+        style = FloatStyle.gold;
       }
-      const lane = this.activeFloats.length % 4;
-      const dir = lane % 2 === 0 ? 1 : -1;
-      item.age = 0;
-      item.vx = dir * (16 + Math.floor(lane / 2) * 14);
-      item.node.active = true;
-      item.label.string = ft.text;
-      item.label.fontSize = Math.round(20 * ft.scale);
-      item.label.lineHeight = item.label.fontSize + 6;
-      item.label.color = hexToColor(ft.color);
-      item.node.setPosition(this.toX(ft.x) + dir * 8, this.toY(ft.y), 0);
-      this.activeFloats.push(item);
+      FloatText.show(this.floatLayer, worldPos, ft.text, style);
     }
-    for (let i = this.activeFloats.length - 1; i >= 0; i--) {
-      const item = this.activeFloats[i];
-      item.age += dt;
-      if (item.age >= FLOAT_LIFE) {
-        item.node.active = false;
-        this.floatPool.push(item);
-        this.activeFloats.splice(i, 1);
-      } else {
-        // 弹出放大后横向微散上浮，避免多段跳字重叠
-        const k = item.age / FLOAT_LIFE;
-        const pop = k < 0.15 ? 0.7 + k * 4 : 1.3 - Math.min(0.3, (k - 0.15) * 0.6);
-        item.node.setScale(pop, pop, 1);
-        const p = item.node.position;
-        item.node.setPosition(p.x + item.vx * dt * (1 - k * 0.6), p.y + 46 * dt, p.z);
+  }
+
+  // 波次开始：「第 N 波」横幅从左划入，停留 1 秒后向右滑出（Boss 波换红色警示）
+  private checkWaveBanner(): void {
+    if (this.world.phase !== 'PLAYING') return;
+    const w = this.world.getCurrentWave();
+    if (w.index <= this.lastWaveShown) return;
+    this.lastWaveShown = w.index;
+    const banner = createUINode('WaveBanner', 750, 96, this.modalLayer, -760, 200);
+    const color = w.isBoss ? '#B71C1C' : '#1A1426';
+    drawRoundedBox(banner, 750, 96, color, 225, 0, w.isBoss ? '#FF5252' : '#FFD54F', 2);
+    const text = w.isBoss ? '敌军首领来袭！' : `第 ${w.index} 波`;
+    createLabel(banner, text, 44, w.isBoss ? '#FFCDD2' : '#FFD54F', 0, 4, 600, 56, true);
+    if (w.total > 0 && !w.isBoss) createLabel(banner, `共 ${w.total} 波`, 18, '#B0BEC5', 0, -32, 300, 24, true);
+    if (w.isBoss) ScreenShake.play(5, 0.2);
+    tween(banner)
+      .to(0.3, { position: new Vec3(0, 200, 0) }, { easing: 'backOut' })
+      .delay(1.0)
+      .to(0.28, { position: new Vec3(760, 200, 0) }, { easing: 'quadIn' })
+      .call(() => { if (banner.isValid) banner.destroy(); })
+      .start();
+  }
+
+  // 城门/基地受击：红色边缘闪屏 + 血条抖动（震屏由 world.shakeRequest 负责）
+  private flashWallHit(lost: number): void {
+    if (!this.hitVignette || !this.hitVignette.isValid) {
+      const v = createUINode('HitVignette', 750, 1334, this.modalLayer, 0, 0);
+      const g = v.addComponent(Graphics);
+      // 四边由外向内两层叠加，近似渐变红边
+      const layers: [number, number][] = [[60, 120], [30, 150]];
+      for (const [t, a] of layers) {
+        g.fillColor = hexToColor('#FF1744', a);
+        g.rect(-375, -667, 750, t);
+        g.rect(-375, 667 - t, 750, t);
+        g.rect(-375, -667, t, 1334);
+        g.rect(375 - t, -667, t, 1334);
+        g.fill();
       }
+      v.addComponent(UIOpacity).opacity = 0;
+      v.setSiblingIndex(0);
+      this.hitVignette = v;
+    }
+    const op = this.hitVignette.getComponent(UIOpacity)!;
+    Tween.stopAllByTag(FxTag.Flash, op);
+    op.opacity = lost >= 150 ? 255 : 150;
+    tween(op).tag(FxTag.Flash).to(0.35, { opacity: 0 }).start();
+
+    const bar = this.barHpFill.parent;
+    if (bar) {
+      Tween.stopAllByTag(FxTag.Wiggle, bar);
+      const base = new Vec3(0, -545, 0);
+      tween(bar).tag(FxTag.Wiggle)
+        .to(0.04, { position: new Vec3(base.x - 7, base.y, 0) })
+        .to(0.04, { position: new Vec3(base.x + 7, base.y, 0) })
+        .to(0.04, { position: new Vec3(base.x - 4, base.y, 0) })
+        .to(0.04, { position: base })
+        .start();
+    }
+  }
+
+  // 敌人死亡：闪白 → 缩小消散 + 掉落金币弹出（Boss 额外光环）
+  private playEnemyDeath(node: Node, key: string): void {
+    const pos = node.position.clone();
+    const isBoss = key.startsWith('boss_');
+    const sp = node.getComponent(Sprite);
+    if (sp) sp.color = COLOR_WHITE;
+    node.getComponent(HitFlash)?.play();
+    let op = node.getComponent(UIOpacity);
+    if (!op) op = node.addComponent(UIOpacity);
+    const opacity = op;
+    tween(node)
+      .to(0.22, { scale: new Vec3(0.15, 0.15, 1) }, { easing: 'quadIn' })
+      .call(() => this.releaseSprite(key, node))
+      .start();
+    tween(opacity).to(0.22, { opacity: 0 }).start();
+
+    playBurstParticles(this.vfxSpriteLayer, pos, isBoss ? 12 : 4, '#FFD54F');
+    if (isBoss) {
+      playGlowRing(this.vfxSpriteLayer, pos, 140, '#FFD54F');
+      playGlowRing(this.vfxSpriteLayer, pos, 160, '#FFF3C4', true);
+    }
+    this.popCoin(pos, isBoss ? 5 : 1);
+  }
+
+  // 掉落金币：向上弹起再落下并淡出（走 FxPool；同屏上限 14 个）
+  private popCoin(pos: Vec3, count: number): void {
+    const sf = ArtAssetManager.getSpriteFrame('icon_gold');
+    for (let i = 0; i < count; i++) {
+      if (this.coinPopActive >= 14) return;
+      this.coinPopActive++;
+      const coin = FxPool.acquire(this.vfxSpriteLayer, {
+        spriteFrame: sf || undefined,
+        size: sf ? 22 : 12,
+        color: sf ? COLOR_WHITE : hexToColor('#FFD54F'),
+      });
+      const dx = (Math.random() - 0.5) * 40 * (count > 1 ? 2 : 1);
+      coin.setPosition(pos.x, pos.y, 0);
+      const cop = coin.getComponent(UIOpacity)!;
+      cop.opacity = 255;
+      tween(coin)
+        .to(0.18, { position: new Vec3(pos.x + dx * 0.5, pos.y + 34, 0) }, { easing: 'quadOut' })
+        .to(0.22, { position: new Vec3(pos.x + dx, pos.y - 6, 0) }, { easing: 'quadIn' })
+        .call(() => { this.coinPopActive = Math.max(0, this.coinPopActive - 1); FxPool.release(coin); })
+        .start();
+      tween(cop).delay(0.28).to(0.12, { opacity: 0 }).start();
     }
   }
 
@@ -1304,7 +1412,7 @@ export class BattleView {
       createLabel(box, '暂无伤害记录，敌军进入防区后开始统计', 20, '#B0BEC5', 0, 20, 520, 36);
     } else {
       entries.slice(0, 8).forEach(([id, dmg], i) => {
-        const name = id === 'LORD' ? '主公(连弩)' : id === 'TOWER' ? '城防箭塔' : (getHeroConfig(id)?.name || id);
+        const name = id === 'LORD' ? '主公(号令)' : id === 'TOWER' ? '城防箭塔' : (getHeroConfig(id)?.name || id);
         const pct = dmg / total;
         const y = 186 - i * 52;
         const txt = createLabel(box, `${name}   ${dmg} (${Math.round(pct * 100)}%)   DPS ${Math.round(dmg / secs)}`, 18, '#FFFFFF', 0, y + 12, 520, 26, true);
@@ -1323,11 +1431,20 @@ export class BattleView {
     }, 0, -258, 22);
   }
 
+  private exitBattle(): void {
+    HitStop.reset();
+    FloatText.clear();
+    FxPool.clear();
+    ScreenShake.I?.stop();
+    this.onExitToHall();
+  }
+
   private showPauseModal(): void {
     const mask = createModalOverlay(this.modalLayer);
     const box = createUINode('PauseBox', 480, 420, mask, 0, 0);
     drawRoundedBox(box, 480, 420, '#221833', 255, 18, '#9575CD', 2);
     ArtAssetManager.skinPanel(box, 480, 420);
+    popInModal(box, mask);
     createLabel(box, '战斗已暂停', 30, '#FFFFFF', 0, 150, 360, 42);
     createButton(box, '继续战斗', 240, 56, '#2E7D32', () => {
       mask.destroy();
@@ -1343,7 +1460,7 @@ export class BattleView {
     }, 100, -10, 19);
     createButton(box, '撤退返回大厅', 240, 56, '#C62828', () => {
       mask.destroy();
-      this.onExitToHall();
+      this.exitBattle();
     }, 0, -110, 22);
   }
 
@@ -1353,6 +1470,7 @@ export class BattleView {
     const box = createUINode('ReviveBox', 540, 360, mask, 0, 0);
     drawRoundedBox(box, 540, 360, '#221833', 255, 18, '#FF5252', 2);
     ArtAssetManager.skinPanel(box, 540, 360);
+    popInModal(box, mask);
     createLabel(box, '城防失守！', 32, '#FF8A80', 0, 115, 420, 44);
     createLabel(box, '观看激励视频可满血复活城防并击退全部敌军！', 20, '#FFE082', 0, 35, 480, 48);
     createButton(box, '复活再战 (广告)', 240, 58, '#2E7D32', async () => {
@@ -1385,15 +1503,47 @@ export class BattleView {
     const box = createUINode('SettleBox', 600, 520, mask, 0, 0);
     drawRoundedBox(box, 600, 520, '#221833', 255, 18, win ? '#FFD54F' : '#90A4AE', 3);
     ArtAssetManager.skinPanel(box, 600, 520);
+    popInModal(box, mask);
+
+    if (win) {
+      attachSpinLoop(box, 300, 22, '#FFD54F', 0, 175, true);
+      attachGlowPulse(box, 200, '#FFE082', 0, 175, true, { minOpacity: 80, maxOpacity: 210, scaleAmp: 0.12 });
+    }
 
     const modeTag = this.world.challenge ? '【精英挑战】' : '';
-    createLabel(box, win ? `${modeTag}大获全胜！(${stars}星)` : `${modeTag}惜败撤退`, 32, win ? '#FFD54F' : '#FF8A80', 0, 195, 540, 46);
-    createLabel(box, `击杀敌军：${this.world.kills}   耗时：${Math.round(this.world.elapsed)}秒`, 20, '#E0E0E0', 0, 130, 500, 32);
+    // 大字弹出：标题从 0 放大回弹
+    const titleLbl = createLabel(box, win ? `${modeTag}大获全胜！` : `${modeTag}惜败撤退`, 36, win ? '#FFD54F' : '#FF8A80', 0, 218, 540, 50, true);
+    titleLbl.node.setScale(0, 0, 1);
+    tween(titleLbl.node).delay(0.12).to(0.4, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+
+    // 星级逐个亮起：先显示 3 颗灰星，胜利时按得星数依次点亮（放大回弹 + 光环 + 火花）
+    for (let i = 0; i < 3; i++) {
+      const sx = (i - 1) * 84;
+      const sy = i === 1 ? 168 : 158; // 中间一颗略高
+      const star = createLabel(box, '★', 64, '#4A4358', sx, sy, 80, 76, true);
+      if (win && i < stars) {
+        star.node.setScale(0.2, 0.2, 1);
+        tween(star.node)
+          .delay(0.55 + i * 0.4)
+          .call(() => {
+            star.color = hexToColor('#FFD54F');
+            AudioManager.playSfx('sfx_levelup');
+            playGlowRing(box, new Vec3(sx, sy, 0), 90, '#FFD54F');
+            playBurstParticles(box, new Vec3(sx, sy, 0), 8, '#FFE082');
+          })
+          .to(0.22, { scale: new Vec3(1.5, 1.5, 1) }, { easing: 'backOut' })
+          .to(0.16, { scale: new Vec3(1, 1, 1) })
+          .start();
+      } else {
+        star.node.setScale(0.9, 0.9, 1);
+      }
+    }
+    createLabel(box, `击杀敌军：${this.world.kills}   耗时：${Math.round(this.world.elapsed)}秒`, 20, '#E0E0E0', 0, 98, 500, 32);
     const shardName = getHeroConfig(reward.shardHeroId || '')?.name || reward.shardHeroId;
     createLabel(
       box,
       `获得奖励：\n铜钱 +${reward.gold}   元宝 +${reward.diamond}\n锻造石 +${reward.forgeStone}   将魂(${shardName}) +${reward.shardCount}`,
-      21, '#80CBC4', 0, 30, 520, 110
+      21, '#80CBC4', 0, 10, 520, 110
     );
 
     let doubled = false;
@@ -1412,6 +1562,6 @@ export class BattleView {
       }
     }, -130, -150, 20);
 
-    createButton(box, '返回大厅', 200, 58, '#5E35B1', () => this.onExitToHall(), 130, -150, 22);
+    createButton(box, '返回大厅', 200, 58, '#5E35B1', () => this.exitBattle(), 130, -150, 22);
   }
 }

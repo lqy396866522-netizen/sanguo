@@ -25,6 +25,7 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
   const excludeSet = new Set(ctx.excludeCardUids || []);
 
   // 1. 新武将招募卡（名将唯一上阵：已上阵的不再作为NEW_HERO）
+  const mustPickHero = ctx.deployedHeroIds.length === 0;
   if (ctx.deployedHeroIds.length < ctx.maxSlots) {
     const isEarlyGuarantee = ctx.battleLevel <= 3 && ctx.deployedHeroIds.length < 2;
     const heroWeight = isEarlyGuarantee ? 280 : 120;
@@ -53,6 +54,27 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
         },
       });
     }
+  }
+
+  // 若场上尚无任何武将且有可招募武将，强制只抽取新武将，保证开局必有武将守城
+  if (mustPickHero && pool.length > 0) {
+    const result: RogueCard[] = [];
+    const copy = [...pool];
+    while (result.length < 3 && copy.length > 0) {
+      const total = copy.reduce((s, e) => s + e.weight, 0);
+      let r = rand() * total;
+      let idx = 0;
+      for (let i = 0; i < copy.length; i++) {
+        r -= copy[i].weight;
+        if (r <= 0) {
+          idx = i;
+          break;
+        }
+      }
+      result.push(copy[idx].card);
+      copy.splice(idx, 1);
+    }
+    return result;
   }
 
   // 2. 主公连弩强化卡

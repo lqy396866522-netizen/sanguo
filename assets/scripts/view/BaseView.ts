@@ -1,4 +1,4 @@
-import { Node } from 'cc';
+import { Graphics, Node, tween, UIOpacity, Vec3 } from 'cc';
 import {
   BASE_TECH_CONFIGS,
   BASE_UNLOCK_LORD_LEVEL,
@@ -6,15 +6,25 @@ import {
 } from '../core/phase2Configs.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
 import {
+  attachBgMotes,
+  attachGlowPulse,
+  attachIdleBreath,
+  attachNumberRoll,
+  attachShineSweep,
   createButton,
   createLabel,
   createUINode,
   drawCardPanel,
   drawRoundedBox,
   hexToColor,
+  playBurstParticles,
+  playGlowRing,
+  playShakeDeny,
   showToast,
 } from './UIFactory';
+import { BreathMode, FloatStyle, FloatText } from '../fx';
 import { ArtAssetManager } from './ArtAssetManager';
+import { AudioManager } from './AudioManager';
 
 type TabKey = 'shop' | 'lord' | 'hall' | 'hero' | 'base';
 
@@ -28,6 +38,7 @@ const TECH_COLORS: Record<string, string> = {
 
 // 城防基地：城墙 / 拒马 / 箭塔 / 烽火台 / 粮仓五项科技，效果直接进入战斗
 export class BaseView {
+  private static pendingTech: { id: string; oldLevel: number } | null = null;
   private root: Node;
   private dataMgr: PlayerDataManager;
   private renderTabs: (active: TabKey) => void;
@@ -47,6 +58,7 @@ export class BaseView {
     drawRoundedBox(bg, 750, 1750, '#1F2A2E', 255, 0);
     ArtAssetManager.createSpriteNode(bg, 'bg_hall', 980, 1750, 0, 0);
     drawRoundedBox(bg, 750, 1750, '#10181C', 215, 0);
+    attachBgMotes(bg, 5, 640, 1000, '#B7D7E8');
 
     const top = createUINode('Top', 710, 78, this.root, 0, 560);
     drawCardPanel(top, 710, 78, '#162024', '#78909C', 12, 2);
@@ -58,43 +70,51 @@ export class BaseView {
 
     // 城池俯瞰示意：优先使用古风城墙贴图，辅以拒马与箭塔层级展示
     const scene = createUINode('Fort', 680, 290, this.root, 0, 340);
-    const g = drawCardPanel(scene, 680, 290, '#24302A', '#78909C', 18, 2);
+    drawCardPanel(scene, 680, 290, '#24302A', '#78909C', 18, 2);
     const lv = (id: string) => p.baseTech[id] || 0;
     const spWall = ArtAssetManager.createSpriteNode(scene, 'wall_battlement', 640, 230, 0, -25);
+    // 建筑画在独立子节点：卡片皮肤 Sprite 是 scene 的子节点，画在 scene 自身 Graphics 上会被整块盖住
+    const bld = createUINode('Buildings', 680, 290, scene, 0, 0);
+    const gb = bld.addComponent(Graphics);
     if (!spWall) {
-      g.fillColor = hexToColor('#3E4A52', 255);
-      g.roundRect(-318, -125, 636, 70 + lv('B_WALL') * 4, 8);
-      g.fill();
-      g.fillColor = hexToColor('#78909C', 255);
-      for (let x = -308; x <= 280; x += 44) g.roundRect(x, -59 + lv('B_WALL') * 4, 28, 16, 3);
-      g.fill();
+      gb.fillColor = hexToColor('#3E4A52', 255);
+      gb.roundRect(-318, -125, 636, 70 + lv('B_WALL') * 4, 8);
+      gb.fill();
+      gb.fillColor = hexToColor('#78909C', 255);
+      for (let x = -308; x <= 280; x += 44) gb.roundRect(x, -59 + lv('B_WALL') * 4, 28, 16, 3);
+      gb.fill();
     }
     if (lv('B_BARRICADE') > 0) {
-      g.strokeColor = hexToColor('#8D6E63', 255);
-      g.lineWidth = 5;
+      gb.strokeColor = hexToColor('#8D6E63', 255);
+      gb.lineWidth = 5;
       const n = 3 + lv('B_BARRICADE') * 2;
       for (let i = 0; i < n; i++) {
         const x = -290 + (580 / n) * (i + 0.5);
-        g.moveTo(x - 10, 48);
-        g.lineTo(x + 10, 70);
-        g.moveTo(x + 10, 48);
-        g.lineTo(x - 10, 70);
+        gb.moveTo(x - 10, 48);
+        gb.lineTo(x + 10, 70);
+        gb.moveTo(x + 10, 48);
+        gb.lineTo(x - 10, 70);
       }
-      g.stroke();
+      gb.stroke();
     }
     if (lv('B_TOWER') > 0) {
       for (const tx of [-268, 268]) {
-        g.fillColor = hexToColor('#5D4037', 255);
-        g.roundRect(tx - 22, -105, 44, 80 + lv('B_TOWER') * 5, 6);
-        g.fill();
+        gb.fillColor = hexToColor('#5D4037', 255);
+        gb.roundRect(tx - 22, -105, 44, 80 + lv('B_TOWER') * 5, 6);
+        gb.fill();
+        // 箭塔火把闪烁
+        attachGlowPulse(scene, 46, '#FFB74D', tx, -105 + 80 + lv('B_TOWER') * 5 + 6, false, { minOpacity: 80, maxOpacity: 230, scaleAmp: 0.2, period: 0.55 });
       }
     }
     if (lv('B_BEACON') > 0) {
-      g.fillColor = hexToColor('#FF7043', 230);
-      g.circle(0, 105, 14 + lv('B_BEACON') * 2);
-      g.fill();
+      gb.fillColor = hexToColor('#FF7043', 230);
+      gb.circle(0, 105, 14 + lv('B_BEACON') * 2);
+      gb.fill();
+      // 烽火闪烁
+      attachGlowPulse(scene, 70 + lv('B_BEACON') * 6, '#FF8A50', 0, 105, false, { minOpacity: 90, maxOpacity: 255, scaleAmp: 0.18, period: 0.7 });
     }
-    ArtAssetManager.createSpriteNode(scene, 'hero_lord', 96, 96, 0, -82);
+    const lordSp = ArtAssetManager.createSpriteNode(scene, 'hero_lord', 96, 96, 0, -82);
+    if (lordSp) attachIdleBreath(lordSp, { mode: BreathMode.Scale, amp: 0.015, period: 1.8 });
 
     if (!this.dataMgr.isBaseUnlocked()) {
       createLabel(scene, `主公 Lv.${BASE_UNLOCK_LORD_LEVEL} 解锁城防基地（当前 Lv.${p.level}）`, 22, '#FF8A80', 0, 112, 640, 36, true);
@@ -113,8 +133,20 @@ export class BaseView {
       const y = 115 - i * 124;
       const cell = createUINode(`Tech_${t.id}`, 680, 114, this.root, 0, y);
       drawCardPanel(cell, 680, 114, '#18232A', TECH_COLORS[t.id] || '#78909C', 14, 2);
-      ArtAssetManager.createSpriteNode(cell, techIcons[t.id] || 'icon_shield', 56, 56, -295, 0);
-      createLabel(cell, `${t.name}  Lv.${level}/${t.maxLevel}`, 23, TECH_COLORS[t.id] || '#FFFFFF', -65, 28, 360, 32, true);
+      const techSp = ArtAssetManager.createSpriteNode(cell, techIcons[t.id] || 'icon_shield', 56, 56, -295, 0);
+      const lvLbl = createLabel(cell, `${t.name}  Lv.${level}/${t.maxLevel}`, 23, TECH_COLORS[t.id] || '#FFFFFF', -65, 28, 360, 32, true);
+      const pend = BaseView.pendingTech && BaseView.pendingTech.id === t.id ? BaseView.pendingTech : null;
+      if (pend) {
+        // 完成：等级数字滚动 + 闪白 + 光环 + 飘字
+        attachNumberRoll(lvLbl.node, pend.oldLevel, { prefix: `${t.name}  Lv.`, suffix: `/${t.maxLevel}`, duration: 0.5 }).rollTo(level);
+        const flash = createUINode('DoneFlash', 680, 114, cell, 0, 0);
+        drawRoundedBox(flash, 680, 114, '#FFFFFF', 220, 14);
+        const fop = flash.addComponent(UIOpacity);
+        fop.opacity = 255;
+        tween(fop).to(0.45, { opacity: 0 }).call(() => { if (flash.isValid) flash.destroy(); }).start();
+        playGlowRing(this.root, new Vec3(-295, y, 0), 100, '#FFD54F');
+        FloatText.show(this.root, cell.worldPosition, '修筑完成!', FloatStyle.levelUp);
+      }
       const cur = level * t.perLevel;
       const next = (level + 1) * t.perLevel;
       const hasPct = t.desc.includes('{v}%');
@@ -126,17 +158,43 @@ export class BaseView {
       if (!full) {
         const cost = baseTechCost(level);
         const canAfford = this.dataMgr.isBaseUnlocked() && p.gold >= cost.gold && p.forgeStone >= cost.forgeStone;
+        if (canAfford && techSp) {
+          // 可升级提示：图标呼吸 + 红点摆动
+          attachIdleBreath(techSp, { mode: BreathMode.Scale, amp: 0.04, period: 1.3 });
+          const dot = createUINode('RedDot', 16, 16, cell, -268, 26);
+          drawRoundedBox(dot, 16, 16, '#E53935', 255, 8, '#FFD54F', 1);
+          attachIdleBreath(dot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3, randomDelay: 2 });
+        }
         createLabel(cell, `消耗：铜钱 ${cost.gold} · 锻造石 ${cost.forgeStone}`, 16, '#FFE082', -45, -38, 410, 24);
-        createButton(cell, '升级', 144, 56, canAfford ? '#2E7D32' : '#546E7A', () => {
+        const upBtn = createButton(cell, '升级', 144, 56, canAfford ? '#2E7D32' : '#546E7A', () => {
           const r = this.dataMgr.upgradeBaseTech(t.id);
           showToast(this.root, r.msg);
-          if (r.ok) this.render();
+          if (r.ok) {
+            // 施工：图标锤击抖动 + 三次锤击火花 → 0.65s 后重绘并播完成反馈
+            BaseView.pendingTech = { id: t.id, oldLevel: level };
+            const iconPos = new Vec3(-295, y, 0);
+            for (let k = 0; k < 3; k++) {
+              tween(cell).delay(k * 0.2).call(() => {
+                AudioManager.playSfx('sfx_wall_hit');
+                playBurstParticles(this.root, new Vec3(iconPos.x + (k - 1) * 10, iconPos.y - 6, 0), 7, '#FFB74D');
+                if (techSp) tween(techSp).to(0.05, { angle: -10 }).to(0.08, { angle: 8 }).to(0.05, { angle: 0 }).start();
+              }).start();
+            }
+            tween(this.root).delay(0.65).call(() => {
+              if (this.root.getChildByName('BaseBg')) this.render();
+            }).start();
+          } else {
+            playShakeDeny(upBtn.node);
+            FloatText.show(this.root, upBtn.node.worldPosition, r.msg, FloatStyle.warn);
+          }
         }, 244, 0, 21);
+        if (canAfford) attachShineSweep(upBtn.node, 144, 56, { loop: true, interval: 3.0, randomDelay: 1.2 });
       } else {
         createButton(cell, '已满级', 144, 56, '#546E7A', () => {}, 244, 0, 20);
       }
     });
 
+    BaseView.pendingTech = null;
     this.renderTabs('base');
   }
 }

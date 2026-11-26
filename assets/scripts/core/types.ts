@@ -120,22 +120,42 @@ export interface EquipAffix {
 export interface EquipSlotData {
   slotType: EquipSlotType;
   slotLevel: number; // 槽位强化等级，无损继承
-  equipTier: number; // 1~6阶
-  equipQuality: number; // 1白~6红
+  equipTier: number; // 1~6阶（0表示未穿戴）
+  equipQuality: number; // 1白~6红（0表示未穿戴）
   affixes: EquipAffix[];
+  equippedUid?: string | null; // 当前穿戴的装备实例UID
+}
+
+export interface EquipItem {
+  uid: string;
+  slotType: EquipSlotType;
+  tier: number;     // 1~6阶
+  quality: number;  // 1白 2绿 3蓝 4紫 5橙 6红
+  affixes: EquipAffix[];
+  locked?: boolean;
 }
 
 export type GemAffixType =
   | 'start_rogue_choice' // 开局直接1次三选一
-  | 'lord_multishot'     // 主公连弩齐射+1
-  | 'lord_pierce'        // 主公弩箭穿透+1
+  | 'lord_multishot'     // 全军连击/主公命令+1
+  | 'lord_pierce'        // 全体穿透+1
   | 'wall_immune_hits'   // 城防开局免疫前N次伤害
-  | 'atk_flat'           // 主公基础攻击+
+  | 'atk_flat'           // 全军基础攻击+
   | 'crit_rate'          // 暴击率+%
   | 'crit_dmg'           // 暴击伤害+%
   | 'fire_dmg_pct'       // 火攻伤害+%
   | 'boss_dmg_pct'       // 对Boss伤害+%
-  | 'hero_dmg_pct';      // 全体武将伤害+%
+  | 'hero_dmg_pct'       // 全体武将伤害+%
+  | 'hero_atk_speed'     // 全体武将攻速+%
+  | 'wall_thorns'        // 城防反伤+%
+  | 'melee_dmg_pct'      // 近战武将伤害+%
+  | 'ranged_dmg_pct';    // 远程武将伤害+%
+
+export interface TalismanSaveData {
+  id: string;
+  unlocked: boolean;
+  level: number; // 1~5
+}
 
 export interface GemItem {
   uid: string;
@@ -175,6 +195,7 @@ export interface PlayerProfile {
   activeScheme: number; // 0, 1, 2 -> 方案1/2/3
   maxClearedStage: number;
   equipSlots: Record<number, EquipSlotData>;
+  equipBag?: EquipItem[];
   gems: GemItem[];
   heroes: Record<string, HeroSaveData>;
   stageProgress: Record<number, StageProgress>;
@@ -185,6 +206,8 @@ export interface PlayerProfile {
   talents: Record<string, number>;
   weaponId: string;
   ownedWeapons: string[];
+  talismans?: Record<string, TalismanSaveData>;
+  equippedTalismans?: string[];
   adDaily: { day: string; counts: Record<string, number> };
   lastStaminaAt?: number;
   shopDaily?: { day: string; counts: Record<string, number> };
@@ -273,4 +296,5 @@ export interface BattleReward {
   shardCount: number;
   newGem?: GemItem;
   newEquipTier?: number;
+  newEquips?: EquipItem[];
 }

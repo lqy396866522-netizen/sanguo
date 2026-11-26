@@ -23,6 +23,9 @@
 | 特效 | `python tools/art/process_art.py vfxsheet <src> <outdir> <9个名字> --cols 3 --rows 3 --size 192` | 192×192 PNG |
 | UI | `python tools/art/process_art.py ui <src> <dst> --size <w>` | 按钮不量化（避免渐变色带） |
 | 预览 | `python tools/art/contact_sheet.py <out.png> <files...>` | 深色 + 草地双底预览 |
+| 动效贴图 | `python tools/art/gen_fx_sprites.py` | `shine_bar` 64×256、`glow_circle` 128、`rays_star` 256、`fx_dot` 32、`fx_ring` 128；纯白 RGBA，**不量化**，合计约 32KB |
+
+动效贴图（shine_bar / glow_circle / rays_star / fx_dot / fx_ring）一律是纯白 + alpha，运行时由 `ArtAssetManager.createFxNode()` 着色并设 **ADD 混合**（`SRC_ALPHA, ONE`）。不要用 256 色量化——曾因量化成 6 色调色板导致光晕/扫光几乎看不见。叠在卡片/按钮皮肤上的光晕、射线须用 `UIFactory.placeAboveSkin()` 定位，不能 `setSiblingIndex(0)`（会被不透明的皮肤 Sprite 盖住）。
 
 抠图算法：自动采样边框底色 → 从边界泛洪（连通阈值 140）→ 封闭孔洞仅在色差 ≤38 时移除 → alpha 在 70~140 渐变 → 去溢色 → MinFilter(3) 收边。
 
@@ -120,6 +123,11 @@
 | wall_battlement | 750×285 | — | 主城与战场底部城墙女墙贴图 |
 | road_tile | 128×128 | — | 战场行军土路平铺贴图 |
 | icon_chest / icon_forge / icon_refine / icon_diamond / icon_gold / icon_stamina / icon_equip / icon_weapon / icon_shield | 96×96 | — | 商业化货币、宝箱、神兵、装备、强化、精炼、城防图标 |
+| bg_hall / bg_forge | 375×667 JPG | — | 暗金三国沙盘大厅背景与深钢聚光锻造工坊背景 |
+| ui_btn_gold / ui_parchment | 128×56 / 128×96 | 20,16,20,16 / 18,18,18,18 | 铆钉金按钮、暖羊皮纸数值对比底板 |
+| cell_q1 ~ cell_q6 | 76×76 | 14,14,14,14 | 凡/良/精/史/传/无双六品质装备与宝石底框 |
+| eq_1 ~ eq_6 / gem_hex / icon_talisman | 64×64 | — | 玉佩/扳指/战甲/战裙/战靴/护腕、六边形多面体宝石、黄金虎符图标 |
+| tab_shop / tab_lord / tab_battle / tab_hero / tab_base | 48×48 | — | 底部统一导航栏五大模块图标 |
 
 ## 5. 新增/替换素材流程
 

@@ -38,11 +38,11 @@ export interface WeaponConfig {
 }
 
 export const WEAPON_CONFIGS: WeaponConfig[] = [
-  { id: 'crossbow', name: '制式连弩', desc: '主公初始佩弩，无额外效果', unlockLordLevel: 1, costDiamond: 0, bulletColor: '#FFEE58', multishot: 0, pierce: 0, critRate: 0, thunderChance: 0 },
-  { id: 'zhuge', name: '诸葛连弩', desc: '每次攻击额外齐射 +1 支弩箭', unlockLordLevel: 4, costDiamond: 300, bulletColor: '#4DD0E1', multishot: 1, pierce: 0, critRate: 0, thunderChance: 0 },
-  { id: 'luori', name: '落日神弓', desc: '弩箭穿透 +1，暴击率 +6%', unlockLordLevel: 8, costDiamond: 600, bulletColor: '#FFB300', multishot: 0, pierce: 1, critRate: 0.06, thunderChance: 0 },
-  { id: 'pili', name: '霹雳雷弩', desc: '命中 25% 概率引雷麻痹 0.5 秒', unlockLordLevel: 12, costDiamond: 900, bulletColor: '#B388FF', multishot: 0, pierce: 0, critRate: 0, thunderChance: 0.25 },
-  { id: 'bawang', name: '霸王破阵弩', desc: '齐射 +1、穿透 +1、暴击率 +10%', unlockLordLevel: 18, costDiamond: 1500, bulletColor: '#FF5252', multishot: 1, pierce: 1, critRate: 0.10, thunderChance: 0 },
+  { id: 'crossbow', name: '制式将令', desc: '主公初始帅印，号令三军稳固阵线', unlockLordLevel: 1, costDiamond: 0, bulletColor: '#FFEE58', multishot: 0, pierce: 0, critRate: 0, thunderChance: 0 },
+  { id: 'zhuge', name: '诸葛羽扇', desc: '全军武将连击/伤害增幅 +10%', unlockLordLevel: 4, costDiamond: 300, bulletColor: '#4DD0E1', multishot: 1, pierce: 0, critRate: 0, thunderChance: 0 },
+  { id: 'luori', name: '落日神弓', desc: '全军武将穿透 +1，暴击率 +6%', unlockLordLevel: 8, costDiamond: 600, bulletColor: '#FFB300', multishot: 0, pierce: 1, critRate: 0.06, thunderChance: 0 },
+  { id: 'pili', name: '霹雳雷印', desc: '全军攻击 20% 概率引雷麻痹 0.5 秒', unlockLordLevel: 12, costDiamond: 900, bulletColor: '#B388FF', multishot: 0, pierce: 0, critRate: 0, thunderChance: 0.25 },
+  { id: 'bawang', name: '霸王虎符戟', desc: '全军连击 +1、穿透 +1、暴击率 +10%', unlockLordLevel: 18, costDiamond: 1500, bulletColor: '#FF5252', multishot: 1, pierce: 1, critRate: 0.10, thunderChance: 0 },
 ];
 
 export function getWeaponConfig(id?: string): WeaponConfig {
@@ -64,7 +64,7 @@ export interface TalentConfig {
 export const TALENT_BRANCH_NAMES: Record<TalentBranch, string> = { atk: '攻伐', def: '固守', res: '屯田' };
 
 export const TALENT_CONFIGS: TalentConfig[] = [
-  { id: 'T_ATK',      branch: 'atk', name: '强弩之末', desc: '主公攻击力 +{v}%', perLevel: 3, maxLevel: 10 },
+  { id: 'T_ATK',      branch: 'atk', name: '强兵号令', desc: '全军基础攻击 +{v}%', perLevel: 3, maxLevel: 10 },
   { id: 'T_CRIT',     branch: 'atk', name: '鹰眼',     desc: '暴击率 +{v}%', perLevel: 1, maxLevel: 10 },
   { id: 'T_CRITDMG',  branch: 'atk', name: '致命一击', desc: '暴击伤害 +{v}%', perLevel: 4, maxLevel: 10 },
   { id: 'T_HERO',     branch: 'atk', name: '将帅同心', desc: '全体武将伤害 +{v}%', perLevel: 3, maxLevel: 10 },
@@ -151,3 +151,70 @@ export const DAILY_SHOP_ITEMS: DailyShopItemConfig[] = [
   { id: 'shop_hero_shards',  name: '名将将魂 ×10',   desc: '随机名将将魂',       currency: 'diamond', price: 100, dailyLimit: 3 },
   { id: 'shop_stamina',      name: '行军粮草 ×25',   desc: '立即补充25点粮草',   currency: 'diamond', price: 30,  dailyLimit: 3 },
 ];
+
+// ---------- 兵符系统（最多同时佩戴2枚，Lv1~5，Lv3激活被动） ----------
+export interface TalismanConfig {
+  id: string;
+  name: string;
+  title: string;
+  desc: string;
+  passiveDesc: string; // Lv3 激活
+  colorHex: string;
+  unlockCostDiamond: number;
+  unlockStage: number; // 0表示可随时购买解锁
+  heroDmgPctPerLv: number;
+  heroAtkSpeedPerLv: number;
+  wallHpPctPerLv: number;
+  critRatePerLv: number;
+  bossDmgPctPerLv: number;
+  startRogueExtraAtLv3?: number;
+  wallThornsAtLv3?: number;
+  goldBonusPctPerLv?: number;
+}
+
+export const TALISMAN_CONFIGS: TalismanConfig[] = [
+  {
+    id: 'T_TIGER', name: '虎豹虎符', title: '猛虎啸营',
+    desc: '全体武将伤害每级 +8%', passiveDesc: '【3级激活】全体武将暴击率 +5%',
+    colorHex: '#FF7043', unlockCostDiamond: 0, unlockStage: 1,
+    heroDmgPctPerLv: 8, heroAtkSpeedPerLv: 0, wallHpPctPerLv: 0, critRatePerLv: 0, bossDmgPctPerLv: 0,
+  },
+  {
+    id: 'T_PHOENIX', name: '朱雀羽符', title: '烈焰疾风',
+    desc: '全体武将攻速每级 +5%', passiveDesc: '【3级激活】开局额外获得 1 次肉鸽三选一',
+    colorHex: '#EF5350', unlockCostDiamond: 200, unlockStage: 2,
+    heroDmgPctPerLv: 3, heroAtkSpeedPerLv: 5, wallHpPctPerLv: 0, critRatePerLv: 0, bossDmgPctPerLv: 0,
+    startRogueExtraAtLv3: 1,
+  },
+  {
+    id: 'T_TORTOISE', name: '玄武重印', title: '铜墙铁壁',
+    desc: '城防生命每级 +10%', passiveDesc: '【3级激活】城防受击反弹 25% 伤害',
+    colorHex: '#42A5F5', unlockCostDiamond: 200, unlockStage: 2,
+    heroDmgPctPerLv: 0, heroAtkSpeedPerLv: 0, wallHpPctPerLv: 10, critRatePerLv: 0, bossDmgPctPerLv: 0,
+    wallThornsAtLv3: 25,
+  },
+  {
+    id: 'T_BAIZE', name: '白泽军令', title: '洞悉弱点',
+    desc: '全军暴击率每级 +2.5%', passiveDesc: '【3级激活】暴击伤害额外 +30%',
+    colorHex: '#66BB6A', unlockCostDiamond: 350, unlockStage: 4,
+    heroDmgPctPerLv: 4, heroAtkSpeedPerLv: 0, wallHpPctPerLv: 0, critRatePerLv: 2.5, bossDmgPctPerLv: 0,
+  },
+  {
+    id: 'T_QILIN', name: '麒麟镇印', title: '破阵诛将',
+    desc: '对首领伤害每级 +10%', passiveDesc: '【3级激活】战斗结算铜钱 +20%',
+    colorHex: '#AB47BC', unlockCostDiamond: 500, unlockStage: 6,
+    heroDmgPctPerLv: 5, heroAtkSpeedPerLv: 0, wallHpPctPerLv: 0, critRatePerLv: 0, bossDmgPctPerLv: 10,
+    goldBonusPctPerLv: 20,
+  },
+  {
+    id: 'T_SEAL', name: '传国玉玺', title: '受命于天',
+    desc: '全军伤害每级 +6%，攻速 +3%，城防 +6%', passiveDesc: '【3级激活】开局额外三选一 +1，全军暴击 +6%',
+    colorHex: '#FFD54F', unlockCostDiamond: 800, unlockStage: 8,
+    heroDmgPctPerLv: 6, heroAtkSpeedPerLv: 3, wallHpPctPerLv: 6, critRatePerLv: 1.5, bossDmgPctPerLv: 5,
+    startRogueExtraAtLv3: 1,
+  },
+];
+
+export function getTalismanConfig(id: string): TalismanConfig | undefined {
+  return TALISMAN_CONFIGS.find((t) => t.id === id);
+}

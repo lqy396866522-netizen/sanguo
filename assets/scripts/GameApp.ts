@@ -6,6 +6,10 @@ import {
   ResolutionPolicy,
   director,
   Director,
+  profiler,
+  tween,
+  UIOpacity,
+  Vec3,
 } from 'cc';
 import { LocalRepository } from './data/LocalRepository.ts';
 import { PlayerDataManager } from './data/PlayerDataManager.ts';
@@ -19,7 +23,32 @@ import { LordView } from './view/LordView';
 import { HeroBookView } from './view/HeroBookView';
 import { BaseView } from './view/BaseView';
 import { BattleView } from './view/BattleView';
-import { createButton, createLabel, createUINode, drawCardPanel, drawRoundedBox, showToast } from './view/UIFactory';
+import {
+  attachBgMotes,
+  attachGlowPulse,
+  attachIdleBreath,
+  attachNumberRoll,
+  attachOrbitCoins,
+  attachPeriodicWiggle,
+  attachShineSweep,
+  attachSpinLoop,
+  createButton,
+  createLabel,
+  createUINode,
+  drawCardPanel,
+  drawRoundedBox,
+  hexToColor,
+  playBurstParticles,
+  playChestOpen,
+  playFadeFromBlack,
+  playFlyIcons,
+  playPopBounce,
+  playShakeDeny,
+  renderBottomNavBar,
+  setIconGray,
+  showToast,
+} from './view/UIFactory';
+import { BreathMode, FloatStyle, FloatText } from './fx';
 import { ArtAssetManager } from './view/ArtAssetManager';
 import { AudioManager } from './view/AudioManager';
 
@@ -42,6 +71,7 @@ export class GameApp extends Component {
 
   protected onLoad(): void {
     view.setDesignResolutionSize(750, 1334, ResolutionPolicy.FIXED_WIDTH);
+    profiler.hideStats();
     const local = new LocalRepository();
     if (GAME_CONFIG.serverUrl) {
       // 联网模式：本地存档作为离线缓存，启动后异步登录拉取服务端存档
@@ -91,34 +121,15 @@ export class GameApp extends Component {
     this.hallView = null;
     this.viewRoot.removeAllChildren();
     AudioManager.playBgm('bgm_hall');
+    // 切 Tab 内容区轻柔淡入 + 上浮 12px
+    const op = this.viewRoot.getComponent(UIOpacity) || this.viewRoot.addComponent(UIOpacity);
+    op.opacity = 180;
+    this.viewRoot.setPosition(0, -12, 0);
+    tween(op).to(0.18, { opacity: 255 }).start();
+    tween(this.viewRoot).to(0.18, { position: new Vec3(0, 0, 0) }, { easing: 'quadOut' }).start();
 
     const renderTabs = (active: TabKey) => {
-      const bar = createUINode('BottomTabs', 750, 114, this.viewRoot, 0, -592);
-      drawCardPanel(bar, 750, 114, '#181122', '#7E57C2', 0, 2);
-      const tabs: { key: TabKey; label: string }[] = [
-        { key: 'shop', label: '军需' },
-        { key: 'lord', label: '主公' },
-        { key: 'hall', label: '征战' },
-        { key: 'hero', label: '武将' },
-        { key: 'base', label: '城防' },
-      ];
-      tabs.forEach((t, idx) => {
-        const x = -280 + idx * 140;
-        const isAct = t.key === active;
-        createButton(
-          bar,
-          t.label,
-          126,
-          82,
-          isAct ? '#FFB300' : '#2C1F3D',
-          () => this.openTab(t.key),
-          x,
-          2,
-          isAct ? 22 : 19,
-          isAct ? '#FFF8E1' : '#5E35B1',
-          isAct ? '#1A1426' : '#E0E0E0'
-        );
-      });
+      renderBottomNavBar(this.viewRoot, active, (t) => this.openTab(t));
     };
 
     if (tab === 'hall') {
@@ -142,39 +153,76 @@ export class GameApp extends Component {
     drawRoundedBox(bg, 750, 1750, '#20162E', 255, 0);
     ArtAssetManager.createSpriteNode(bg, 'bg_hall', 980, 1750, 0, 0);
     drawRoundedBox(bg, 750, 1750, '#120C1C', 210, 0);
+    attachBgMotes(bg, 6, 640, 1000);
 
     const p = this.dataMgr.profile;
     const top = createUINode('ShopTop', 700, 96, bg, 0, 540);
     drawCardPanel(top, 700, 96, '#1B1325', '#FFB300', 14, 2);
     createLabel(top, '军需商店 · 每日补给', 28, '#FFD54F', 0, 18, 620, 36, true);
     ArtAssetManager.createSpriteNode(top, 'icon_diamond', 28, 28, -220, -20);
-    createLabel(top, `元宝 ${p.diamond}`, 19, '#81D4FA', -145, -20, 130, 28);
+    const lblDia = createLabel(top, `元宝 ${p.diamond}`, 19, '#81D4FA', -145, -20, 130, 28);
+    const nrDia = attachNumberRoll(lblDia.node, p.diamond, { prefix: '元宝 ', tintOnIncrease: true });
     ArtAssetManager.createSpriteNode(top, 'icon_gold', 28, 28, -25, -20);
-    createLabel(top, `铜钱 ${p.gold}`, 19, '#FFE082', 55, -20, 140, 28);
+    const lblGold = createLabel(top, `铜钱 ${p.gold}`, 19, '#FFE082', 55, -20, 140, 28);
+    const nrGold = attachNumberRoll(lblGold.node, p.gold, { prefix: '铜钱 ', tintOnIncrease: true });
     ArtAssetManager.createSpriteNode(top, 'icon_stamina', 28, 28, 170, -20);
-    createLabel(top, `粮草 ${p.stamina}/${p.maxStamina}`, 19, '#FF8A65', 245, -20, 140, 28);
+    const lblStam = createLabel(top, `粮草 ${p.stamina}/${p.maxStamina}`, 19, '#FF8A65', 245, -20, 140, 28);
+    const nrStam = attachNumberRoll(lblStam.node, p.stamina, { prefix: '粮草 ', suffix: `/${p.maxStamina}`, tintOnIncrease: true });
+    // 购买后让顶部三项资源同步滚动
+    const rollResources = () => {
+      nrDia.rollTo(p.diamond);
+      nrGold.rollTo(p.gold);
+      nrStam.rollTo(p.stamina);
+    };
 
+    // ---- 每日军需宝箱：可领取时 浮动 + 金色光晕；已领取变灰并停止全部动效 ----
     const chestLeft = this.dataMgr.adLeft('shop_free_chest');
+    const canClaim = chestLeft > 0;
     const freeCard = createUINode('FreeChest', 700, 74, bg, 0, 444);
-    drawCardPanel(freeCard, 700, 74, '#1B2E22', chestLeft > 0 ? '#69F0AE' : '#546E7A', 14, 2);
-    ArtAssetManager.createSpriteNode(freeCard, 'icon_chest', 50, 50, -300, 0);
-    createLabel(freeCard, '每日军需宝箱 · 铜钱×500 锻造石×5', 20, '#FFFFFF', -60, 12, 400, 28, true);
-    createLabel(freeCard, `每日免费观看激励视频领取 (${chestLeft}/1)`, 15, '#A5D6A7', -60, -16, 400, 24);
-    createButton(freeCard, chestLeft > 0 ? '免费领' : '已领取', 132, 50, chestLeft > 0 ? '#2E7D32' : '#546E7A', async () => {
-      const res = await this.adService.showRewardedAd('shop_free_chest');
-      if (res.completed) {
-        this.dataMgr.profile.gold += 500;
-        this.dataMgr.profile.forgeStone += 5;
-        this.dataMgr.save();
-        AudioManager.playSfx('sfx_coin');
-        showToast(this.viewRoot, '获得 铜钱×500 锻造石×5');
-        this.openTab('shop');
-      } else {
+    drawCardPanel(freeCard, 700, 74, '#1B2E22', canClaim ? '#69F0AE' : '#546E7A', 14, 2);
+    if (canClaim) attachGlowPulse(freeCard, 96, '#FFD54F', -300, 0, true, { minOpacity: 90, maxOpacity: 230, scaleAmp: 0.14 });
+    const freeChestSp = ArtAssetManager.createSpriteNode(freeCard, 'icon_chest', 50, 50, -300, 0);
+    if (freeChestSp) {
+      if (canClaim) attachIdleBreath(freeChestSp, { mode: BreathMode.Float, amp: 5, period: 1.3 });
+      else setIconGray(freeChestSp, true);
+    }
+    createLabel(freeCard, '每日军需宝箱 · 铜钱×500 锻造石×5', 20, canClaim ? '#FFFFFF' : '#90A4AE', -60, 12, 400, 28, true);
+    createLabel(freeCard, `每日免费观看激励视频领取 (${chestLeft}/1)`, 15, canClaim ? '#A5D6A7' : '#78909C', -60, -16, 400, 24);
+    let claiming = false;
+    const chestBtn = createButton(freeCard, canClaim ? '免费领' : '已领取', 132, 50, canClaim ? '#2E7D32' : '#546E7A', async () => {
+      if (claiming) return;
+      if (!canClaim) {
+        playShakeDeny(chestBtn.node);
         showToast(this.viewRoot, '今日已领取');
+        return;
       }
+      claiming = true;
+      const res = await this.adService.showRewardedAd('shop_free_chest');
+      if (!res.completed) {
+        claiming = false;
+        playShakeDeny(chestBtn.node);
+        showToast(this.viewRoot, '今日已领取');
+        return;
+      }
+      this.dataMgr.profile.gold += 500;
+      this.dataMgr.profile.forgeStone += 5;
+      this.dataMgr.save();
+      AudioManager.playSfx('sfx_coin');
+      const chestPos = new Vec3(-300, 444, 0);
+      const onOpen = () => {
+        playFlyIcons(this.viewRoot, chestPos, new Vec3(55, 520, 0), 5, 'icon_gold', '#FFD54F', () => nrGold.rollTo(this.dataMgr.profile.gold));
+        playFlyIcons(this.viewRoot, chestPos, new Vec3(55, 520, 0), 3, 'icon_forge', '#B0BEC5');
+        FloatText.show(this.viewRoot, freeCard.worldPosition, '+500铜钱 +5锻造石', FloatStyle.gold);
+        chestBtn.label.string = '已领取';
+        showToast(this.viewRoot, '获得 铜钱×500 锻造石×5');
+        tween(this.viewRoot).delay(0.9).call(() => this.openTab('shop')).start();
+      };
+      if (freeChestSp) playChestOpen(freeChestSp, this.viewRoot, chestPos, onOpen);
+      else onOpen();
     }, 264, 0, 18);
+    if (canClaim) attachShineSweep(chestBtn.node, 132, 50, { loop: true, interval: 2.6 });
 
-    // 日常军需货架（图标 + 卡片 + 独立购买按钮）
+    // ---- 日常军需货架（图标呼吸错开起步；购买：图标弹跳 + 剩余次数翻动） ----
     const iconByItem: Record<string, string> = {
       shop_forge_stone: 'icon_forge',
       shop_refine_stone: 'icon_refine',
@@ -188,11 +236,17 @@ export class GameApp extends Component {
       const unit = item.currency === 'gold' ? '铜钱' : '元宝';
       const card = createUINode(`ShopItem_${idx}`, 700, 68, bg, 0, y);
       drawCardPanel(card, 700, 68, '#1B1325', left > 0 ? '#7E57C2' : '#455A64', 12, 2);
-      ArtAssetManager.createSpriteNode(card, iconByItem[item.id] || 'icon_gold', 46, 46, -300, 0);
-      createLabel(card, `${item.name}  [今日剩${left}/${item.dailyLimit}]`, 20, '#FFD54F', -75, 12, 370, 26);
-      createLabel(card, item.desc, 16, '#E0E0E0', -75, -15, 370, 24);
+      const itemSp = ArtAssetManager.createSpriteNode(card, iconByItem[item.id] || 'icon_gold', 46, 46, -300, 0);
+      if (itemSp) {
+        if (left > 0) attachIdleBreath(itemSp, { mode: BreathMode.Scale, amp: 0.04, period: 1.4, randomDelay: 1.6 });
+        else setIconGray(itemSp, true);
+      }
+      const nameLbl = createLabel(card, `${item.name}  [今日剩${left}/${item.dailyLimit}]`, 20, left > 0 ? '#FFD54F' : '#78909C', -75, 12, 370, 26);
+      const nrLeft = attachNumberRoll(nameLbl.node, left, { prefix: `${item.name}  [今日剩`, suffix: `/${item.dailyLimit}]`, duration: 0.35 });
+      nrLeft.setNow(left);
+      createLabel(card, item.desc, 16, left > 0 ? '#E0E0E0' : '#78909C', -75, -15, 370, 24);
       const btnColor = left > 0 ? (item.currency === 'gold' ? '#F57F17' : '#1565C0') : '#546E7A';
-      createButton(
+      const buyBtn = createButton(
         card,
         left > 0 ? `${item.price}${unit}` : '已售罄',
         142,
@@ -200,29 +254,60 @@ export class GameApp extends Component {
         btnColor,
         () => {
           const r = this.dataMgr.buyShopItem(item.id);
-          if (r.ok) AudioManager.playSfx('sfx_coin');
+          if (r.ok) {
+            AudioManager.playSfx('sfx_coin');
+            if (itemSp) playPopBounce(itemSp);
+            playBurstParticles(this.viewRoot, new Vec3(258, y, 0), 8, '#FFD54F');
+            FloatText.show(this.viewRoot, buyBtn.node.worldPosition, r.msg, FloatStyle.gold);
+            const newLeft = this.dataMgr.shopLeft(item.id);
+            nrLeft.rollTo(newLeft);
+            if (newLeft <= 0) nameLbl.color = hexToColor('#78909C');
+            rollResources();
+            tween(this.viewRoot).delay(0.7).call(() => this.openTab('shop')).start();
+          } else {
+            playShakeDeny(buyBtn.node);
+            FloatText.show(this.viewRoot, buyBtn.node.worldPosition, r.msg, FloatStyle.warn);
+          }
           showToast(this.viewRoot, r.msg);
-          if (r.ok) this.openTab('shop');
         },
         258,
         0,
         18
       );
+      if (left > 0) attachShineSweep(buyBtn.node, 142, 48, { loop: true, interval: 3.2, randomDelay: 1.5 });
     });
 
+    // ---- 尊享特权与超值礼包 ----
     createLabel(bg, '尊享特权与超值礼包', 20, '#FFE082', 0, -48, 660, 28, true);
     const prodIcons = ['icon_diamond', 'icon_weapon', 'icon_chest'];
     this.shopService.getProducts().forEach((prod, i) => {
       const y = -114 - i * 86;
       const card = createUINode(`Prod_${prod.id}`, 700, 74, bg, 0, y);
       drawCardPanel(card, 700, 74, '#241836', '#FFB300', 12, 2);
-      ArtAssetManager.createSpriteNode(card, prodIcons[i] || 'icon_diamond', 48, 48, -300, 0);
+      if (i === 0) attachSpinLoop(card, 92, 18, '#FFD54F', -300, 0, true);
+      if (i === 2) {
+        attachOrbitCoins(card, -300, 0, 34, 6, -45);
+        attachGlowPulse(card, 84, '#FFD54F', -300, 0, true, { minOpacity: 70, maxOpacity: 200, scaleAmp: 0.12 });
+      }
+      const pSp = ArtAssetManager.createSpriteNode(card, prodIcons[i] || 'icon_diamond', 48, 48, -300, 0);
+      if (pSp && i === 0) attachShineSweep(pSp, 48, 48, { loop: true, interval: 3, duration: 0.7 });
+      if (pSp && i === 2) attachIdleBreath(pSp, { mode: BreathMode.Float, amp: 5, period: 1.5 });
       createLabel(card, prod.name, 21, '#FFD54F', -75, 14, 370, 28);
       createLabel(card, prod.desc, 16, '#E1BEE7', -75, -16, 370, 24);
-      createButton(card, `¥${prod.priceYuan}`, 132, 48, '#C62828', async () => {
+      const pBtn = createButton(card, `¥${prod.priceYuan}`, 132, 48, '#C62828', async () => {
         const r = await this.shopService.purchase(prod.id);
         showToast(this.viewRoot, r.msg);
       }, 264, 0, 20);
+      attachShineSweep(pBtn.node, 132, 48, { loop: true, interval: i === 1 ? 2.5 : 2.8, randomDelay: 1.2 });
+      if (i === 1) {
+        // 首充：按钮整体呼吸 + 周期性抖动；右上角「超值」标签摆动
+        attachIdleBreath(pBtn.node, { mode: BreathMode.Scale, amp: 0.04, period: 1.3 });
+        attachPeriodicWiggle(pBtn.node, 4, 3);
+        const hot = createUINode('HotTag', 44, 20, pBtn.node, 48, 20);
+        drawRoundedBox(hot, 44, 20, '#FFB300', 255, 6);
+        createLabel(hot, '超值', 12, '#1A1426', 0, 0, 42, 18, true);
+        attachIdleBreath(hot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3 });
+      }
     });
     renderTabs('shop');
   }
@@ -248,6 +333,7 @@ export class GameApp extends Component {
         challenge,
         ticket?.seed
       );
+      playFadeFromBlack(this.viewRoot, 0.35); // 接转场：从黑幕淡入战场
     }).catch(() => {
       this.enteringBattle = false;
     });

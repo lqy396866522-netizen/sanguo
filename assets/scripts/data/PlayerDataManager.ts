@@ -1,16 +1,21 @@
 import type {
   BattleReport,
   BattleReward,
+  EquipAffix,
+  EquipItem,
   EquipSlotData,
   EquipSlotType,
   GemAffixType,
   GemItem,
   HeroSaveData,
   PlayerProfile,
+  TalismanSaveData,
 } from '../core/types.ts';
 import {
+  EQUIP_SET_BONUS,
   GEM_AFFIX_META,
   HERO_CONFIGS,
+  QUALITY_NAMES,
   SLOT_GEM_POOL,
 } from '../core/configs.ts';
 import {
@@ -21,8 +26,10 @@ import {
   DAILY_SHOP_ITEMS,
   PATROL_RULES,
   TALENT_CONFIGS,
+  TALISMAN_CONFIGS,
   WEAPON_CONFIGS,
   baseTechCost,
+  getTalismanConfig,
   getWeaponConfig,
   patrolHourlyYield,
   talentPointsForLevel,
@@ -30,7 +37,7 @@ import {
 import type { IDataRepository } from './IDataRepository.ts';
 import type { LordBattleBonus } from '../core/BattleWorld.ts';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 const BASE_MAX_STAMINA = 50;
 export const STAMINA_RECOVER_MS = 6 * 60 * 1000; // 每 6 分钟恢复 1 点粮草
 const TALENT_RESET_DIAMOND = 100;
@@ -74,8 +81,13 @@ export class PlayerDataManager {
       }
       // v2 -> v3：补齐挑战/巡逻/城防基地/天赋/神兵/广告次数字段
       if (this.profile.schemaVersion < 3) {
-        this.profile.schemaVersion = SCHEMA_VERSION;
+        this.profile.schemaVersion = 3;
         this.fillV3Fields(this.profile);
+      }
+      // v3 -> v4：补齐装备背包、兵符系统，并平滑迁移旧槽位装备到背包实例
+      if (this.profile.schemaVersion < 4) {
+        this.profile.schemaVersion = SCHEMA_VERSION;
+        this.migrateV3ToV4(this.profile);
       }
       this.syncUnlockConditions();
       this.syncMaxStamina();
@@ -99,6 +111,33 @@ export class PlayerDataManager {
     p.shopDaily = p.shopDaily || { day: '', counts: {} };
   }
 
+  private migrateV3ToV4(p: PlayerProfile): void {
+    this.fillV3Fields(p);
+    p.equipBag = p.equipBag || [];
+    p.talismans = p.talismans || {};
+    p.equippedTalismans = p.equippedTalismans || [];
+    for (const tc of TALISMAN_CONFIGS) {
+      if (!p.talismans[tc.id]) {
+        p.talismans[tc.id] = { id: tc.id, unlocked: false, level: 0 };
+      }
+    }
+    for (let s = 1; s <= 6; s++) {
+      const slot = p.equipSlots[s];
+      if (slot && slot.equipTier > 0 && slot.equipQuality > 0 && !slot.equippedUid) {
+        const item: EquipItem = {
+          uid: `EQ_M_${s}_${Date.now()}_${this.uidSeq++}`,
+          slotType: s as EquipSlotType,
+          tier: slot.equipTier,
+          quality: slot.equipQuality,
+          affixes: slot.affixes && slot.affixes.length > 0 ? [...slot.affixes] : [{ type: s <= 2 || s === 6 ? 'atk_pct' : 'hp_pct', value: 4 }],
+          locked: false,
+        };
+        p.equipBag.push(item);
+        slot.equippedUid = item.uid;
+      }
+    }
+  }
+
   private dayKey(): string {
     const d = new Date(this.now());
     return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
@@ -114,9 +153,10 @@ export class PlayerDataManager {
       equipSlots[s] = {
         slotType: s as EquipSlotType,
         slotLevel: 1,
-        equipTier: 1,
-        equipQuality: 2,
-        affixes: [{ type: s <= 2 || s === 6 ? 'atk_pct' : 'hp_pct', value: 4 }],
+        equipTier: 0,
+        equipQuality: 0,
+        affixes: [],
+        equippedUid: null,
       };
     }
 
@@ -128,6 +168,11 @@ export class PlayerDataManager {
         level: 1,
         shards: h.unlockType === 'INIT' ? 5 : 0,
       };
+    }
+
+    const talismans: Record<string, TalismanSaveData> = {};
+    for (const tc of TALISMAN_CONFIGS) {
+      talismans[tc.id] = { id: tc.id, unlocked: false, level: 0 };
     }
 
     // 初始赠送若干颗宝石，并将前3颗默认镶嵌在方案1上（全体武将增伤+开局三选一+城防免伤）
@@ -166,9 +211,12 @@ export class PlayerDataManager {
       activeScheme: 0,
       maxClearedStage: 0,
       equipSlots,
+      equipBag: [],
       gems: starterGems,
       heroes,
       stageProgress: {},
+      talismans,
+      equippedTalismans: [],
     } as PlayerProfile;
     this.fillV3Fields(profile);
     return profile;
@@ -200,6 +248,59 @@ export class PlayerDataManager {
     return totalLv * 0.01;
   }
 
+  public getEquipSetStatus(): { active: boolean; equippedCount: number; minQuality: number; bonusPct: number } {
+    let equippedCount = 0;
+    let minQuality = 99;
+    for (let s = 1; s <= 6; s++) {
+      const slot = this.profile.equipSlots[s];
+      if (slot && slot.equipQuality > 0) {
+        equippedCount++;
+        if (slot.equipQuality < minQuality) minQuality = slot.equipQuality;
+      }
+    }
+    const active = equippedCount === 6 && minQuality >= 1 && minQuality <= 6;
+    return {
+      active,
+      equippedCount,
+      minQuality: active ? minQuality : 0,
+      bonusPct: active ? (EQUIP_SET_BONUS[minQuality] || 0) : 0,
+    };
+  }
+
+  public getTalismanEffects() {
+    let heroDmgPct = 0;
+    let heroAtkSpeedPct = 0;
+    let wallHpPct = 0;
+    let critRatePct = 0;
+    let critDmgPct = 0;
+    let bossDmgPct = 0;
+    let startRogueExtra = 0;
+    let wallThornsPct = 0;
+    let goldBonusPct = 0;
+
+    const equipped = this.profile.equippedTalismans || [];
+    for (const id of equipped) {
+      const save = this.profile.talismans?.[id];
+      const cfg = getTalismanConfig(id);
+      if (!save || !save.unlocked || save.level <= 0 || !cfg) continue;
+      const lv = save.level;
+      heroDmgPct += cfg.heroDmgPctPerLv * lv;
+      heroAtkSpeedPct += cfg.heroAtkSpeedPerLv * lv;
+      wallHpPct += cfg.wallHpPctPerLv * lv;
+      critRatePct += cfg.critRatePerLv * lv;
+      bossDmgPct += cfg.bossDmgPctPerLv * lv;
+      if (lv >= 3) {
+        if (id === 'T_TIGER') critRatePct += 5;
+        if (id === 'T_BAIZE') critDmgPct += 30;
+        if (id === 'T_SEAL') critRatePct += 6;
+        if (cfg.startRogueExtraAtLv3) startRogueExtra += cfg.startRogueExtraAtLv3;
+        if (cfg.wallThornsAtLv3) wallThornsPct += cfg.wallThornsAtLv3;
+        if (cfg.goldBonusPctPerLv) goldBonusPct += cfg.goldBonusPctPerLv;
+      }
+    }
+    return { heroDmgPct, heroAtkSpeedPct, wallHpPct, critRatePct, critDmgPct, bossDmgPct, startRogueExtra, wallThornsPct, goldBonusPct };
+  }
+
   public getLordBattleBonus(): LordBattleBonus {
     let atk = 68 + (this.profile.level - 1) * 8;
     let wallHp = 3200 + (this.profile.level - 1) * 160;
@@ -209,15 +310,20 @@ export class PlayerDataManager {
     for (let s = 1; s <= 6; s++) {
       const slot = this.profile.equipSlots[s];
       if (!slot) continue;
-      const factor = 1 + (slot.slotLevel - 1) * 0.22 + (slot.equipTier - 1) * 0.45 + (slot.equipQuality - 1) * 0.15;
+      const hasEquip = slot.equipTier > 0 && slot.equipQuality > 0;
+      const factor = hasEquip
+        ? 1 + (slot.slotLevel - 1) * 0.22 + (slot.equipTier - 1) * 0.45 + (slot.equipQuality - 1) * 0.15
+        : 0.35 + (slot.slotLevel - 1) * 0.15;
       if (s === 1 || s === 2 || s === 6) atk += Math.round(18 * factor);
       else wallHp += Math.round(280 * factor);
 
-      for (const af of slot.affixes) {
-        if (af.type === 'atk_pct') atk = Math.round(atk * (1 + af.value / 100));
-        else if (af.type === 'hp_pct') wallHp = Math.round(wallHp * (1 + af.value / 100));
-        else if (af.type === 'crit_rate') critRate += af.value / 100;
-        else if (af.type === 'crit_dmg') critDmg += af.value / 100;
+      if (hasEquip) {
+        for (const af of slot.affixes) {
+          if (af.type === 'atk_pct') atk = Math.round(atk * (1 + af.value / 100));
+          else if (af.type === 'hp_pct') wallHp = Math.round(wallHp * (1 + af.value / 100));
+          else if (af.type === 'crit_rate') critRate += af.value / 100;
+          else if (af.type === 'crit_dmg') critDmg += af.value / 100;
+        }
       }
     }
 
@@ -233,7 +339,7 @@ export class PlayerDataManager {
     critRate += (gemEffects.crit_rate || 0) / 100;
     critDmg += (gemEffects.crit_dmg || 0) / 100;
 
-    // 二期：天赋 / 城防基地 / 神兵
+    // 二期：天赋 / 城防基地 / 神兵 / 套装 / 兵符
     const tv = (id: string) => this.talentValue(id);
     const bv = (id: string) => this.baseTechValue(id);
     atk = Math.round(atk * (1 + tv('T_ATK') / 100));
@@ -243,12 +349,17 @@ export class PlayerDataManager {
     if (tv('T_HERO') > 0) gemEffects.hero_dmg_pct = (gemEffects.hero_dmg_pct || 0) + tv('T_HERO');
     if (tv('T_IMMUNE') > 0) gemEffects.wall_immune_hits = (gemEffects.wall_immune_hits || 0) + tv('T_IMMUNE');
 
+    const setStatus = this.getEquipSetStatus();
+    const talismanEffects = this.getTalismanEffects();
+
     return {
       baseAtk: atk,
       maxWallHp: wallHp,
       critRate: Math.min(0.9, critRate),
       globalCritDmgBonus: critDmg,
       gemEffects,
+      setDamageBonusPct: setStatus.bonusPct,
+      talismanEffects,
       expGainPct: tv('T_EXP') + bv('B_BEACON'),
       wallReducePct: tv('T_REDUCE'),
       towerLevel: this.profile.baseTech.B_TOWER || 0,
@@ -485,47 +596,226 @@ export class PlayerDataManager {
 
   public getCombatPower(): number {
     const b = this.getLordBattleBonus();
-    return Math.round(b.baseAtk * 2.2 + b.maxWallHp * 0.08 + b.critRate * 600 + b.globalCritDmgBonus * 400);
+    const talBonus = (b.talismanEffects?.heroDmgPct || 0) * 6 + (b.talismanEffects?.heroAtkSpeedPct || 0) * 8;
+    const setBonus = (b.setDamageBonusPct || 0) * 8;
+    return Math.round(b.baseAtk * 2.2 + b.maxWallHp * 0.08 + b.critRate * 600 + b.globalCritDmgBonus * 400 + talBonus + setBonus);
+  }
+
+  public getSlotUpgradeCost(slotType: EquipSlotType): { gold: number; forgeStone: number } {
+    const slot = this.profile.equipSlots[slotType];
+    const lv = slot ? slot.slotLevel : 1;
+    return {
+      gold: 100 + lv * 60 + Math.max(0, lv - 10) * 80,
+      forgeStone: 2 + Math.floor(lv / 2) + Math.max(0, Math.floor((lv - 10) / 3)),
+    };
   }
 
   // 槽位强化升级（无损继承）
   public upgradeEquipSlot(slotType: EquipSlotType): { ok: boolean; msg: string } {
     const slot = this.profile.equipSlots[slotType];
     if (!slot) return { ok: false, msg: '部位不存在' };
-    const costGold = 100 + slot.slotLevel * 60 + Math.max(0, slot.slotLevel - 10) * 80;
-    const costStone = 2 + Math.floor(slot.slotLevel / 2) + Math.max(0, Math.floor((slot.slotLevel - 10) / 3));
-    if (this.profile.gold < costGold) return { ok: false, msg: '铜钱不足' };
-    if (this.profile.forgeStone < costStone) return { ok: false, msg: '锻造石不足' };
+    const cost = this.getSlotUpgradeCost(slotType);
+    if (this.profile.gold < cost.gold) return { ok: false, msg: '铜钱不足' };
+    if (this.profile.forgeStone < cost.forgeStone) return { ok: false, msg: '锻造石不足' };
 
-    this.profile.gold -= costGold;
-    this.profile.forgeStone -= costStone;
+    this.profile.gold -= cost.gold;
+    this.profile.forgeStone -= cost.forgeStone;
     slot.slotLevel += 1;
     this.save();
     return { ok: true, msg: '强化成功' };
   }
 
+  public upgradeEquipSlotMax(slotType: EquipSlotType): { ok: boolean; levelsGained: number; msg: string } {
+    const slot = this.profile.equipSlots[slotType];
+    if (!slot) return { ok: false, levelsGained: 0, msg: '部位不存在' };
+    let levelsGained = 0;
+    while (levelsGained < 50) {
+      const cost = this.getSlotUpgradeCost(slotType);
+      if (this.profile.gold < cost.gold || this.profile.forgeStone < cost.forgeStone) break;
+      this.profile.gold -= cost.gold;
+      this.profile.forgeStone -= cost.forgeStone;
+      slot.slotLevel += 1;
+      levelsGained++;
+    }
+    if (levelsGained === 0) return { ok: false, levelsGained: 0, msg: '材料或铜钱不足' };
+    this.save();
+    return { ok: true, levelsGained, msg: `一键强化 +${levelsGained} 级` };
+  }
+
+  public makeEquipItem(slotType: EquipSlotType, tier: number, quality: number): EquipItem {
+    const affixCount = quality >= 5 ? 3 : quality >= 3 ? 2 : 1;
+    const pool: EquipAffix['type'][] = ['atk_pct', 'hp_pct', 'crit_rate', 'crit_dmg', 'elem_pct'];
+    const affixes: EquipAffix[] = [];
+    for (let i = 0; i < affixCount; i++) {
+      const t = pool[(slotType + i + Math.floor(Math.random() * pool.length)) % pool.length];
+      const val = 2 + tier * 2 + quality * 2 + Math.floor(Math.random() * 3);
+      affixes.push({ type: t, value: val });
+    }
+    return {
+      uid: `EQ_${Date.now()}_${this.uidSeq++}_${Math.floor(Math.random() * 999)}`,
+      slotType,
+      tier: Math.max(1, tier),
+      quality: Math.max(1, Math.min(6, quality)),
+      affixes,
+      locked: false,
+    };
+  }
+
+  public equipItem(uid: string): OpResult {
+    this.profile.equipBag = this.profile.equipBag || [];
+    const item = this.profile.equipBag.find((e) => e.uid === uid);
+    if (!item) return { ok: false, msg: '装备不存在' };
+    const slot = this.profile.equipSlots[item.slotType];
+    if (!slot) return { ok: false, msg: '部位不存在' };
+    slot.equippedUid = item.uid;
+    slot.equipTier = item.tier;
+    slot.equipQuality = item.quality;
+    slot.affixes = [...item.affixes];
+    this.save();
+    return { ok: true, msg: `已穿戴 ${item.tier}阶·${QUALITY_NAMES[item.quality]}` };
+  }
+
+  public unequipSlot(slotType: EquipSlotType): OpResult {
+    const slot = this.profile.equipSlots[slotType];
+    if (!slot || !slot.equippedUid) return { ok: false, msg: '该部位未穿戴装备' };
+    slot.equippedUid = null;
+    slot.equipTier = 0;
+    slot.equipQuality = 0;
+    slot.affixes = [];
+    this.save();
+    return { ok: true, msg: '已卸下装备' };
+  }
+
+  public getPromoteCost(slotType: EquipSlotType): { gold: number; forgeStone: number; refineStone: number } | null {
+    const slot = this.profile.equipSlots[slotType];
+    if (!slot || slot.equipQuality <= 0 || slot.equipQuality >= 6) return null;
+    const q = slot.equipQuality;
+    return {
+      gold: q * 400,
+      forgeStone: q * 8,
+      refineStone: q * 3,
+    };
+  }
+
+  public promoteEquipQuality(slotType: EquipSlotType): OpResult {
+    const slot = this.profile.equipSlots[slotType];
+    if (!slot || slot.equipQuality <= 0) return { ok: false, msg: '请先穿戴装备再升品' };
+    if (slot.equipQuality >= 6) return { ok: false, msg: '已达最高品质（无双红品）' };
+    const cost = this.getPromoteCost(slotType)!;
+    if (this.profile.gold < cost.gold) return { ok: false, msg: '铜钱不足' };
+    if (this.profile.forgeStone < cost.forgeStone) return { ok: false, msg: '锻造石不足' };
+    if (this.profile.refineStone < cost.refineStone) return { ok: false, msg: '洗炼石不足' };
+
+    this.profile.gold -= cost.gold;
+    this.profile.forgeStone -= cost.forgeStone;
+    this.profile.refineStone -= cost.refineStone;
+
+    slot.equipQuality += 1;
+    // 升品同时强化原有词条，且在 3品/5品 时额外追加 1 条副词条
+    slot.affixes = slot.affixes.map((a) => ({ ...a, value: a.value + 2 }));
+    if ((slot.equipQuality === 3 && slot.affixes.length < 2) || (slot.equipQuality === 5 && slot.affixes.length < 3)) {
+      const pool: EquipAffix['type'][] = ['atk_pct', 'hp_pct', 'crit_rate', 'crit_dmg', 'elem_pct'];
+      const extraType = pool[(slotType + slot.equipQuality) % pool.length];
+      slot.affixes.push({ type: extraType, value: 3 + slot.equipTier * 2 + slot.equipQuality });
+    }
+
+    if (slot.equippedUid && this.profile.equipBag) {
+      const eq = this.profile.equipBag.find((e) => e.uid === slot.equippedUid);
+      if (eq) {
+        eq.quality = slot.equipQuality;
+        eq.affixes = [...slot.affixes];
+      }
+    }
+    this.save();
+    return { ok: true, msg: `升品成功！晋升为 ${QUALITY_NAMES[slot.equipQuality]}` };
+  }
+
+  public decomposeEquip(uid: string): { ok: boolean; forgeStone: number; gold: number; msg: string } {
+    this.profile.equipBag = this.profile.equipBag || [];
+    const idx = this.profile.equipBag.findIndex((e) => e.uid === uid);
+    if (idx < 0) return { ok: false, forgeStone: 0, gold: 0, msg: '装备不存在' };
+    const eq = this.profile.equipBag[idx];
+    if (eq.locked) return { ok: false, forgeStone: 0, gold: 0, msg: '已锁定装备不可分解' };
+    for (let s = 1; s <= 6; s++) {
+      if (this.profile.equipSlots[s]?.equippedUid === uid) {
+        return { ok: false, forgeStone: 0, gold: 0, msg: '已穿戴装备不可分解' };
+      }
+    }
+    this.profile.equipBag.splice(idx, 1);
+    const forgeStone = (eq.tier + eq.quality * 2) * 2;
+    const gold = eq.quality * 120;
+    this.profile.forgeStone += forgeStone;
+    this.profile.gold += gold;
+    this.save();
+    return { ok: true, forgeStone, gold, msg: `分解获得 锻造石+${forgeStone} 铜钱+${gold}` };
+  }
+
+  public decomposeLowQualityEquips(maxQuality = 2): { count: number; forgeStone: number; gold: number } {
+    this.profile.equipBag = this.profile.equipBag || [];
+    const equippedUids = new Set<string>();
+    for (let s = 1; s <= 6; s++) {
+      const uid = this.profile.equipSlots[s]?.equippedUid;
+      if (uid) equippedUids.add(uid);
+    }
+    let count = 0;
+    let forgeStone = 0;
+    let gold = 0;
+    const kept: EquipItem[] = [];
+    for (const eq of this.profile.equipBag) {
+      if (!eq.locked && !equippedUids.has(eq.uid) && eq.quality <= maxQuality) {
+        count++;
+        forgeStone += (eq.tier + eq.quality * 2) * 2;
+        gold += eq.quality * 120;
+      } else {
+        kept.push(eq);
+      }
+    }
+    if (count > 0) {
+      this.profile.equipBag = kept;
+      this.profile.forgeStone += forgeStone;
+      this.profile.gold += gold;
+      this.save();
+    }
+    return { count, forgeStone, gold };
+  }
+
   // 穿戴更高阶装备（槽位强化等级 100% 自动继承）
   public equipHigherTier(slotType: EquipSlotType, newTier: number, newQuality: number): void {
+    const item = this.makeEquipItem(slotType, newTier, newQuality);
+    this.profile.equipBag = this.profile.equipBag || [];
+    this.profile.equipBag.push(item);
     const slot = this.profile.equipSlots[slotType];
-    if (!slot) return;
-    slot.equipTier = Math.max(slot.equipTier, newTier);
-    slot.equipQuality = Math.max(slot.equipQuality, newQuality);
+    if (slot && (slot.equipTier === 0 || newTier > slot.equipTier || (newTier === slot.equipTier && newQuality > slot.equipQuality))) {
+      slot.equippedUid = item.uid;
+      slot.equipTier = item.tier;
+      slot.equipQuality = item.quality;
+      slot.affixes = [...item.affixes];
+    }
     this.save();
   }
 
   // 装备改良（重随副属性）
   public refineEquipSlot(slotType: EquipSlotType): { ok: boolean; msg: string } {
     const slot = this.profile.equipSlots[slotType];
-    if (!slot) return { ok: false, msg: '部位不存在' };
+    if (!slot || slot.equipQuality <= 0) return { ok: false, msg: '请先穿戴装备再改良' };
     if (this.profile.refineStone < 2 || this.profile.gold < 150) {
       return { ok: false, msg: '材料或铜钱不足' };
     }
     this.profile.refineStone -= 2;
     this.profile.gold -= 150;
     const types: EquipSlotData['affixes'][0]['type'][] = ['atk_pct', 'hp_pct', 'crit_rate', 'crit_dmg', 'elem_pct'];
-    const t = types[Math.floor(Math.random() * types.length)];
-    const val = 3 + slot.equipTier * 2 + Math.floor(Math.random() * 5);
-    slot.affixes = [{ type: t, value: val }];
+    const count = Math.max(1, slot.affixes.length);
+    const nextAffixes: EquipAffix[] = [];
+    for (let i = 0; i < count; i++) {
+      const t = types[Math.floor(Math.random() * types.length)];
+      const val = 3 + slot.equipTier * 2 + slot.equipQuality + Math.floor(Math.random() * 4);
+      nextAffixes.push({ type: t, value: val });
+    }
+    slot.affixes = nextAffixes;
+    if (slot.equippedUid && this.profile.equipBag) {
+      const eq = this.profile.equipBag.find((e) => e.uid === slot.equippedUid);
+      if (eq) eq.affixes = [...nextAffixes];
+    }
     this.save();
     return { ok: true, msg: '改良成功' };
   }
@@ -543,11 +833,13 @@ export class PlayerDataManager {
     if (!gem) return { ok: false, msg: '宝石不存在' };
     const bit = 1 << this.profile.activeScheme;
 
-    // 找出当前方案同部位已占孔位
+    // 找出当前方案同部位已占孔位，并校验 5 孔宝石功效不可重复
     const usedHoles = new Set<number>();
+    const existingHoleMap = new Map<number, GemItem>();
     for (const g of this.profile.gems) {
       if (g.slotType === gem.slotType && (g.schemeMask & bit) !== 0 && g.holeIndex >= 0) {
         usedHoles.add(g.holeIndex);
+        existingHoleMap.set(g.holeIndex, g);
       }
     }
 
@@ -558,6 +850,12 @@ export class PlayerDataManager {
       }
     }
     if (hole < 0 || hole >= 5) return { ok: false, msg: '该部位 5 个宝石孔已满' };
+
+    for (const [hIdx, g] of existingHoleMap.entries()) {
+      if (hIdx !== hole && g.affixType === gem.affixType) {
+        return { ok: false, msg: '同部位不可镶嵌相同功效的宝石' };
+      }
+    }
 
     // 若目标孔已有宝石，先卸下当前方案标记
     for (const g of this.profile.gems) {
@@ -750,6 +1048,31 @@ export class PlayerDataManager {
       this.profile.gems.push(gem);
       reward.newGem = gem;
 
+      this.profile.equipBag = this.profile.equipBag || [];
+      const droppedEquips: EquipItem[] = [];
+      const tier = Math.min(6, Math.max(1, Math.ceil(stageId / 2)));
+      // 第1关首通必掉2件不同部位装备，快速开启装备系统；其余关卡必掉1件随机装备
+      if (stageId === 1 && this.profile.maxClearedStage < 1) {
+        const s1 = 1 as EquipSlotType;
+        const s2 = 3 as EquipSlotType;
+        droppedEquips.push(this.makeEquipItem(s1, 1, 2), this.makeEquipItem(s2, 1, 2));
+      } else {
+        const dropSlot = ((Math.floor(Math.random() * 6) + 1) as EquipSlotType);
+        const q = Math.min(6, Math.max(1, (stars >= 3 ? 2 : 1) + Math.floor((stageId - 1) / 2)));
+        droppedEquips.push(this.makeEquipItem(dropSlot, tier, q));
+      }
+      for (const eq of droppedEquips) {
+        this.profile.equipBag.push(eq);
+        const slot = this.profile.equipSlots[eq.slotType];
+        if (slot && (!slot.equippedUid || slot.equipQuality === 0)) {
+          slot.equippedUid = eq.uid;
+          slot.equipTier = eq.tier;
+          slot.equipQuality = eq.quality;
+          slot.affixes = [...eq.affixes];
+        }
+      }
+      reward.newEquips = droppedEquips;
+
       this.profile.maxClearedStage = Math.max(this.profile.maxClearedStage, stageId);
       const prog = this.profile.stageProgress[stageId] || { stageId, bestStars: 0, claimedMask: 0 };
       prog.bestStars = Math.max(prog.bestStars, stars);
@@ -757,6 +1080,58 @@ export class PlayerDataManager {
     }
     this.addLordExp(reward.exp);
     this.save();
+  }
+
+  // ---------- 兵符系统 ----------
+  public unlockOrUpgradeTalisman(id: string): OpResult {
+    const cfg = getTalismanConfig(id);
+    if (!cfg) return { ok: false, msg: '兵符不存在' };
+    this.profile.talismans = this.profile.talismans || {};
+    const save = this.profile.talismans[id] || { id, unlocked: false, level: 0 };
+    if (!save.unlocked) {
+      if (cfg.unlockStage > 0 && this.profile.maxClearedStage < cfg.unlockStage) {
+        return { ok: false, msg: `需先通关第 ${cfg.unlockStage} 关` };
+      }
+      if (this.profile.diamond < cfg.unlockCostDiamond) return { ok: false, msg: '元宝不足' };
+      this.profile.diamond -= cfg.unlockCostDiamond;
+      save.unlocked = true;
+      save.level = 1;
+      this.profile.talismans[id] = save;
+      this.profile.equippedTalismans = this.profile.equippedTalismans || [];
+      if (this.profile.equippedTalismans.length < 2 && !this.profile.equippedTalismans.includes(id)) {
+        this.profile.equippedTalismans.push(id);
+      }
+      this.save();
+      return { ok: true, msg: `解锁兵符【${cfg.name}】` };
+    }
+    if (save.level >= 5) return { ok: false, msg: '兵符已达最高 5 级' };
+    const costDiamond = save.level * 150;
+    const costStone = save.level * 5;
+    if (this.profile.diamond < costDiamond) return { ok: false, msg: `元宝不足（需 ${costDiamond}）` };
+    if (this.profile.forgeStone < costStone) return { ok: false, msg: `锻造石不足（需 ${costStone}）` };
+    this.profile.diamond -= costDiamond;
+    this.profile.forgeStone -= costStone;
+    save.level += 1;
+    this.profile.talismans[id] = save;
+    this.save();
+    return { ok: true, msg: `${cfg.name} 升至 ${save.level} 级` };
+  }
+
+  public equipTalisman(id: string): OpResult {
+    const save = this.profile.talismans?.[id];
+    if (!save || !save.unlocked) return { ok: false, msg: '尚未解锁该兵符' };
+    this.profile.equippedTalismans = this.profile.equippedTalismans || [];
+    if (this.profile.equippedTalismans.includes(id)) return { ok: false, msg: '已佩戴该兵符' };
+    if (this.profile.equippedTalismans.length >= 2) return { ok: false, msg: '最多同时佩戴 2 枚兵符，请先卸下' };
+    this.profile.equippedTalismans.push(id);
+    this.save();
+    return { ok: true, msg: `已佩戴【${getTalismanConfig(id)?.name || id}】` };
+  }
+
+  public unequipTalisman(id: string): OpResult {
+    this.profile.equippedTalismans = (this.profile.equippedTalismans || []).filter((x) => x !== id);
+    this.save();
+    return { ok: true, msg: '已卸下兵符' };
   }
 
   // 双倍领取等额外发放：只加资源，不推进进度、不再掉落装备宝石

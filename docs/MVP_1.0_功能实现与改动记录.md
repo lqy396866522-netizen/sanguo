@@ -206,3 +206,26 @@
 2. 注册企业主体小游戏，替换 `touristappid`，配置 `WX_APPID`/`WX_SECRET`、激励视频广告位 ID、虚拟支付参数。
 3. 部署后端并在 `GameConfig.ts` 填写 `serverUrl`（需为已在小程序后台配置的 HTTPS 合法域名）。
 4. 生产环境设置 `ALLOW_DEV_LOGIN=false`、`ALLOW_MOCK_PAY=false`，更换 `JWT_SECRET`。
+
+---
+
+## 9. v3.0 玩法重构、兵符/装备养成与商业化 UI 升级
+
+| 模块 | 核心改动 | 关键文件 |
+| --- | --- | --- |
+| 纯辅助主公 | 移除主公普攻射击（`damageStats.LORD === 0`），主公坐镇城墙提供号令/神兵/兵符光环；0武将开局时首次肉鸽必出 `NEW_HERO` | [BattleWorld.ts](file:///h:/sanguo_tafang/assets/scripts/core/BattleWorld.ts), [RogueSystem.ts](file:///h:/sanguo_tafang/assets/scripts/core/RogueSystem.ts) |
+| 装备掉落与套装 | 新号开局 6 装备槽全空；第 1 关首通保底掉 2 件不同部位装备；支持白/绿/蓝/紫/橙/红 6 品质、升品、一键强化、分解返还；穿齐 6 件激活最低品质全军伤害共鸣（+5%~+65%） | [PlayerDataManager.ts](file:///h:/sanguo_tafang/assets/scripts/data/PlayerDataManager.ts), [configs.ts](file:///h:/sanguo_tafang/assets/scripts/core/configs.ts) |
+| 5 孔宝石互斥 | 每件装备 5 个宝石孔，强制同部位不可镶嵌相同 `affixType` 功效的宝石；新增攻速/近战/远程/反伤词条 | [PlayerDataManager.ts](file:///h:/sanguo_tafang/assets/scripts/data/PlayerDataManager.ts), [types.ts](file:///h:/sanguo_tafang/assets/scripts/core/types.ts) |
+| 兵符系统 | 新增 6 枚传奇兵符（虎符/朱雀/玄武/白泽/麒麟/玉玺），1~5 级养成，3 级激活被动，最多同时佩戴 2 枚进入战斗加成 | [phase2Configs.ts](file:///h:/sanguo_tafang/assets/scripts/core/phase2Configs.ts), [LordView.ts](file:///h:/sanguo_tafang/assets/scripts/view/LordView.ts) |
+| 独立锻造工坊 | 新增 `ForgeView.ts` 独立界面（深钢聚光、羊皮纸前后数值对比、材料红白校验、一键强化、底部 6 槽切换、强化/升品模式切换） | [ForgeView.ts](file:///h:/sanguo_tafang/assets/scripts/view/ForgeView.ts) |
+| 商业化暗金 UI | 重构 `HallView.ts`、`LordView.ts`、`UIFactory.ts`，接入 `profiler.hideStats()` 隐藏调试面板，统一底部导航与流光/摇晃微动效；新增美术套件（首包总计 350.6 KB） | [HallView.ts](file:///h:/sanguo_tafang/assets/scripts/view/HallView.ts), [build_ui_kit.py](file:///h:/sanguo_tafang/tools/art/build_ui_kit.py) |
+
+---
+
+## 10. v3.1 `sanguo_fx` 动效组件库全量接入
+
+| 模块 | 接入组件与效果 | 关键文件 |
+| --- | --- | --- |
+| 动效基础设施 | 统一 `ButtonFX`（全项目按钮/Tab/槽位按压回弹）、`PanelPopup`（弹窗及遮罩淡入淡出）、`attachShineSweep`（`Mask`+`shine_bar`）、`attachGlowPulse`、`attachSpinLoop`、`attachHitFlash`、`attachNumberRoll`、`FxPool` 飞行与粒子封装 | [UIFactory.ts](file:///h:/sanguo_tafang/assets/scripts/view/UIFactory.ts), [ArtAssetManager.ts](file:///h:/sanguo_tafang/assets/scripts/view/ArtAssetManager.ts) |
+| 6 大外围界面 | 征战（资源滚动/切关滑入/箭头浮动/VS光晕/宝箱开箱飞金币/开始按钮呼吸扫光）、主公（底座射线/战力滚动飘字/紫装流光）、锻造工坊（闪白+扫光+火花粒子+升级飘字）、军需商店（月卡旋转/首充呼吸/购买粒子）、点将录（波浪入场/可升红点摆动/暴伤滚动）、城防（建筑呼吸/锤击火花） | [HallView.ts](file:///h:/sanguo_tafang/assets/scripts/view/HallView.ts), [LordView.ts](file:///h:/sanguo_tafang/assets/scripts/view/LordView.ts), [ForgeView.ts](file:///h:/sanguo_tafang/assets/scripts/view/ForgeView.ts), [GameApp.ts](file:///h:/sanguo_tafang/assets/scripts/GameApp.ts), [HeroBookView.ts](file:///h:/sanguo_tafang/assets/scripts/view/HeroBookView.ts), [BaseView.ts](file:///h:/sanguo_tafang/assets/scripts/view/BaseView.ts) |
+| 战斗手感与对象池 | `ScreenShake` 震屏、`HitStop` 暴击/重击顿帧、`HitFlash` 怪物受击闪白挤压、`FloatText` 飘字对象池、`FxPool` 击杀粒子，退出时全量 `clear()`/`reset()` | [BattleView.ts](file:///h:/sanguo_tafang/assets/scripts/view/BattleView.ts) |

@@ -34,26 +34,41 @@ export const QUALITY_COLORS: Record<number, string> = {
   6: '#FF4444',
 };
 
+// 全套6件装备达成同一最低品质时的全军伤害加成(%)
+export const EQUIP_SET_BONUS: Record<number, number> = {
+  1: 5,
+  2: 10,
+  3: 18,
+  4: 30,
+  5: 45,
+  6: 65,
+};
+
 export const GEM_AFFIX_META: Record<GemAffixType, { name: string; unit: string; baseVal: number; stepVal: number }> = {
   start_rogue_choice: { name: '开局额外三选一', unit: '次', baseVal: 1, stepVal: 0 },
-  lord_multishot:     { name: '主公连弩齐射', unit: '发', baseVal: 1, stepVal: 0 },
-  lord_pierce:        { name: '主公弩箭穿透', unit: '层', baseVal: 1, stepVal: 0 },
+  lord_multishot:     { name: '全军连击增幅', unit: '层', baseVal: 1, stepVal: 0 },
+  lord_pierce:        { name: '全军破甲穿透', unit: '层', baseVal: 1, stepVal: 0 },
   wall_immune_hits:   { name: '城防初始免伤', unit: '次', baseVal: 2, stepVal: 2 },
-  atk_flat:           { name: '主公攻击力', unit: '', baseVal: 12, stepVal: 15 },
+  atk_flat:           { name: '全军基础攻击', unit: '', baseVal: 12, stepVal: 15 },
   crit_rate:          { name: '暴击率', unit: '%', baseVal: 3, stepVal: 2.5 },
   crit_dmg:           { name: '暴击伤害', unit: '%', baseVal: 12, stepVal: 10 },
   fire_dmg_pct:       { name: '火攻伤害', unit: '%', baseVal: 10, stepVal: 8 },
   boss_dmg_pct:       { name: '首领伤害', unit: '%', baseVal: 10, stepVal: 8 },
   hero_dmg_pct:       { name: '全体武将伤害', unit: '%', baseVal: 8, stepVal: 7 },
+  hero_atk_speed:     { name: '全体武将攻速', unit: '%', baseVal: 4, stepVal: 3 },
+  wall_thorns:        { name: '城防反震伤害', unit: '%', baseVal: 15, stepVal: 10 },
+  melee_dmg_pct:      { name: '近战武将伤害', unit: '%', baseVal: 10, stepVal: 8 },
+  ranged_dmg_pct:     { name: '远程武将伤害', unit: '%', baseVal: 10, stepVal: 8 },
 };
 
+// 每个部位至少配置5种不同词条，保证5孔宝石各不相同
 export const SLOT_GEM_POOL: Record<EquipSlotType, GemAffixType[]> = {
-  1: ['start_rogue_choice', 'hero_dmg_pct', 'atk_flat'],
-  2: ['lord_multishot', 'crit_dmg', 'boss_dmg_pct'],
-  3: ['wall_immune_hits', 'crit_rate', 'hero_dmg_pct'],
-  4: ['lord_pierce', 'atk_flat', 'boss_dmg_pct'],
-  5: ['crit_rate', 'hero_dmg_pct', 'fire_dmg_pct'],
-  6: ['fire_dmg_pct', 'crit_dmg', 'atk_flat'],
+  1: ['start_rogue_choice', 'hero_dmg_pct', 'atk_flat', 'hero_atk_speed', 'crit_rate', 'melee_dmg_pct'],
+  2: ['lord_multishot', 'crit_dmg', 'boss_dmg_pct', 'ranged_dmg_pct', 'atk_flat'],
+  3: ['wall_immune_hits', 'crit_rate', 'hero_dmg_pct', 'wall_thorns', 'melee_dmg_pct'],
+  4: ['lord_pierce', 'atk_flat', 'boss_dmg_pct', 'hero_atk_speed', 'wall_thorns'],
+  5: ['crit_rate', 'hero_dmg_pct', 'fire_dmg_pct', 'hero_atk_speed', 'ranged_dmg_pct'],
+  6: ['fire_dmg_pct', 'crit_dmg', 'atk_flat', 'melee_dmg_pct', 'boss_dmg_pct'],
 };
 
 export function expNeededForLevel(level: number): number {
@@ -61,12 +76,12 @@ export function expNeededForLevel(level: number): number {
 }
 
 export const LORD_SKILLS: LordSkillConfig[] = [
-  { id: 'LS_MULTI',  name: '连发齐射', desc: '主公连弩每次额外发射 +1 支弩箭', maxLevel: 4, tag: '主公' },
-  { id: 'LS_PIERCE', name: '重弩穿甲', desc: '主公弩箭穿透敌人数 +1，对重甲增伤 +15%', maxLevel: 4, tag: '主公' },
-  { id: 'LS_SPEED',  name: '神速连射', desc: '主公攻击速度提升 +20%', maxLevel: 4, tag: '主公' },
-  { id: 'LS_FIRE',   name: '火箭附魔', desc: '主公弩箭命中触发火攻爆炸溅射，克制藤甲', maxLevel: 3, tag: '火攻' },
-  { id: 'LS_THUNDER',name: '雷电麻痹', desc: '主公命中概率引动落雷并麻痹敌人 0.5 秒', maxLevel: 3, tag: '雷策' },
-  { id: 'LS_CRIT',   name: '弱点暴击', desc: '主公暴击率 +12%，暴击伤害 +30%', maxLevel: 3, tag: '暴击' },
+  { id: 'LS_MULTI',  name: '号令齐射', desc: '全军武将普攻伤害提升 +18%，并有概率触发连击', maxLevel: 4, tag: '号令' },
+  { id: 'LS_PIERCE', name: '破甲军令', desc: '全军武将无视敌军 15% 抗性，弹道穿透 +1', maxLevel: 4, tag: '破甲' },
+  { id: 'LS_SPEED',  name: '急行军令', desc: '全军武将攻击速度提升 +16%', maxLevel: 4, tag: '攻速' },
+  { id: 'LS_FIRE',   name: '火箭军令', desc: '全军攻击附加 15% 火焰灼烧伤害，克制藤甲', maxLevel: 3, tag: '火攻' },
+  { id: 'LS_THUNDER',name: '雷策军令', desc: '全军命中概率引动落雷并麻痹敌人 0.5 秒', maxLevel: 3, tag: '雷策' },
+  { id: 'LS_CRIT',   name: '弱点洞察', desc: '全军暴击率 +10%，暴击伤害 +25%', maxLevel: 3, tag: '暴击' },
   { id: 'LS_WALL',   name: '城防固守', desc: '立即回复 20% 城防血量，并提升 10% 城防减伤', maxLevel: 3, tag: '城防' },
 ];
 
@@ -243,19 +258,19 @@ export const HERO_CONFIGS: HeroConfig[] = [
 
 export const MONSTER_CONFIGS: Record<string, MonsterConfig> = {
   M_INFANTRY: {
-    id: 'M_INFANTRY', name: '黄巾步卒', space: 'ground', speed: 54, baseHp: 380, wallDmg: 45, exp: 18, radius: 18,
+    id: 'M_INFANTRY', name: '黄巾步卒', space: 'ground', speed: 54, baseHp: 300, wallDmg: 40, exp: 18, radius: 18,
     resistMelee: 0, resistRanged: 0, resistMagic: 0,
     resistPhysical: 0, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
     colorHex: '#D4A359',
   },
   M_RATTAN: {
-    id: 'M_RATTAN', name: '藤甲重盾', space: 'ground', speed: 40, baseHp: 650, wallDmg: 80, exp: 26, radius: 22,
+    id: 'M_RATTAN', name: '藤甲重盾', space: 'ground', speed: 40, baseHp: 520, wallDmg: 70, exp: 26, radius: 22,
     resistMelee: 0.1, resistRanged: 0.1, resistMagic: 0,
     resistPhysical: 0.55, resistFire: -0.5, resistLightning: 0, resistIce: 0, resistPoison: 0,
     weakElement: 'fire', colorHex: '#5D4037',
   },
   M_SHIELD: {
-    id: 'M_SHIELD', name: '大盾锐士', space: 'ground', speed: 42, baseHp: 580, wallDmg: 75, exp: 24, radius: 22,
+    id: 'M_SHIELD', name: '大盾锐士', space: 'ground', speed: 42, baseHp: 480, wallDmg: 65, exp: 24, radius: 22,
     resistMelee: -0.3, resistRanged: 0.55, resistMagic: 0.1,
     resistPhysical: 0.1, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
     weakDistance: 'melee', colorHex: '#607D8B',
@@ -296,7 +311,7 @@ export const MONSTER_CONFIGS: Record<string, MonsterConfig> = {
 
   // 10 大独立机制 Boss
   BOSS_ZHANGBO: {
-    id: 'BOSS_ZHANGBO', name: '地公将军·张宝', space: 'ground', speed: 26, baseHp: 2800, wallDmg: 160, exp: 220, radius: 34, isBoss: true,
+    id: 'BOSS_ZHANGBO', name: '地公将军·张宝', space: 'ground', speed: 26, baseHp: 2300, wallDmg: 140, exp: 220, radius: 34, isBoss: true,
     resistMelee: 0, resistRanged: 0, resistMagic: 0.1, resistPhysical: 0.1, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
     colorHex: '#FBC02D', bossMechanic: '每8秒召唤3名黄巾步卒助战',
   },

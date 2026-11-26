@@ -38,6 +38,18 @@ export interface LordBattleBonus {
   critRate: number;
   globalCritDmgBonus: number;
   gemEffects: Partial<Record<GemAffixType, number>>;
+  setDamageBonusPct?: number;
+  talismanEffects?: {
+    heroDmgPct: number;
+    heroAtkSpeedPct: number;
+    wallHpPct: number;
+    critRatePct: number;
+    critDmgPct: number;
+    bossDmgPct: number;
+    startRogueExtra: number;
+    wallThornsPct: number;
+    goldBonusPct: number;
+  };
   // 二期：城防基地 / 天赋 / 神兵（均为可选，缺省等同 MVP 行为）
   expGainPct?: number;
   wallReducePct?: number;
@@ -265,7 +277,8 @@ export class BattleWorld {
     this.seed = o.seed ?? randomSeed();
     this.rng = o.rng || createSeededRng(this.seed);
 
-    this.maxWallHp = Math.round(lordBonus.maxWallHp);
+    const talWallPct = (lordBonus.talismanEffects?.wallHpPct || 0) / 100;
+    this.maxWallHp = Math.round(lordBonus.maxWallHp * (1 + talWallPct));
     this.wallHp = this.maxWallHp;
     this.wallImmuneHits = Math.round(lordBonus.gemEffects.wall_immune_hits || 0);
     this.wallDamageReduce = Math.min(0.4, (lordBonus.wallReducePct || 0) / 100);
@@ -281,8 +294,8 @@ export class BattleWorld {
       });
     }
 
-    // 每局天生赠送1次免费开局点将，若镶嵌玉佩开局宝石再额外叠加
-    const startChoices = 1 + Math.round(lordBonus.gemEffects.start_rogue_choice || 0);
+    // 每局天生赠送1次免费开局点将，若镶嵌玉佩开局宝石或装备3级兵符再额外叠加
+    const startChoices = 1 + Math.round(lordBonus.gemEffects.start_rogue_choice || 0) + (lordBonus.talismanEffects?.startRogueExtra || 0);
     this.pendingLevelUps += startChoices;
     this.openingChoicesLeft = startChoices;
     this.triggerNextRogueChoice();
@@ -393,6 +406,22 @@ export class BattleWorld {
       }
     }
     return { valid: true };
+  }
+
+  // 只读：当前已开始刷怪的最大波次序号（UI 波次横幅用，不参与战斗逻辑）
+  public getCurrentWave(): { index: number; total: number; isBoss: boolean } {
+    let index = 0;
+    let isBoss = false;
+    let total = 0;
+    for (let i = 0; i < this.stage.waves.length; i++) {
+      const w = this.stage.waves[i];
+      total = Math.max(total, w.waveIndex);
+      if (this.waveSpawnState[i].spawned > 0 && w.waveIndex >= index) {
+        index = w.waveIndex;
+        isBoss = !!w.isBoss;
+      }
+    }
+    return { index, total, isBoss };
   }
 
   public getWaveProgress(): number {
@@ -569,71 +598,8 @@ export class BattleWorld {
     return 1 + bonus;
   }
 
-  private updateLord(dt: number): void {
-    const spdLv = this.lordSkillLevels['LS_SPEED'] || 0;
-    const aura = this.getAuraSpeedFactor(LORD_POS.x, LORD_POS.y);
-    const interval = Math.max(0.24, 0.78 / ((1 + 0.2 * spdLv) * aura));
-
-    this.lordCooldown -= dt;
-    if (this.lordCooldown > 0) return;
-
-    const target = this.findNearestTarget(LORD_POS.x, LORD_POS.y, LORD_RANGE, true);
-    if (!target) return;
-
-    this.lordCooldown = interval;
-    this.lordAttackAnimTimer = 0.16;
-
-    const weapon = getWeaponConfig(this.lordBonus.weaponId);
-    const multiCount = 1 + (this.lordSkillLevels['LS_MULTI'] || 0) + Math.round(this.lordBonus.gemEffects.lord_multishot || 0) + weapon.multishot;
-    const pierce = (this.lordSkillLevels['LS_PIERCE'] || 0) + Math.round(this.lordBonus.gemEffects.lord_pierce || 0) + weapon.pierce;
-    const critLv = this.lordSkillLevels['LS_CRIT'] || 0;
-    const fireLv = this.lordSkillLevels['LS_FIRE'] || 0;
-    const thunderLv = this.lordSkillLevels['LS_THUNDER'] || 0;
-    const thunderChance = Math.min(0.6, (thunderLv > 0 ? 0.3 : 0) + weapon.thunderChance);
-
-    const baseAngle = Math.atan2(target.y - LORD_POS.y, target.x - LORD_POS.x);
-    const spread = 0.11;
-    const startAngle = baseAngle - (spread * (multiCount - 1)) / 2;
-
-    for (let i = 0; i < multiCount; i++) {
-      const ang = startAngle + i * spread;
-      const spd = 760;
-      this.bullets.push({
-        id: this.nextUid++,
-        sourceId: 'LORD',
-        x: LORD_POS.x,
-        y: LORD_POS.y + 18,
-        prevX: LORD_POS.x,
-        prevY: LORD_POS.y + 18,
-        vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd,
-        speed: spd,
-        pierceLeft: pierce,
-        hitUids: new Set(),
-        color: fireLv > 0 ? '#FF7043' : thunderLv > 0 ? '#9575CD' : weapon.bulletColor,
-        fireSplash: fireLv > 0,
-        thunderStun: thunderChance > 0,
-        thunderChance,
-        knockbackPx: 0,
-        life: 1.0,
-        atkParams: {
-          baseAtk: this.lordBonus.baseAtk,
-          skillMultiplier: 0.62, // 兼顾防线清杂与让出武将主力输出
-          outLevelBonus: 0,
-          globalDmgPct: 0,
-          elementDmgPct: fireLv > 0 ? (this.lordBonus.gemEffects.fire_dmg_pct || 0) / 100 : 0,
-          distanceDmgPct: 0,
-          bossDmgPct: (this.lordBonus.gemEffects.boss_dmg_pct || 0) / 100,
-          armorPenetration: 0.22 + pierce * 0.08,
-          critRate: this.lordBonus.critRate + critLv * 0.12 + weapon.critRate,
-          critDmgBonus: this.lordBonus.globalCritDmgBonus + critLv * 0.30,
-          dimDistance: 'ranged',
-          dimElement: fireLv > 0 ? 'fire' : 'physical',
-          canHitAir: true,
-          rng: this.rng,
-        },
-      });
-    }
+  private updateLord(_dt: number): void {
+    // 主公站在城墙之上纯做统帅号令与城防固守，不直接发射攻击（damageStats.LORD 恒为 0）
   }
 
   // 城防基地箭塔：城墙两端自动射击，射程覆盖墙前防线
@@ -669,11 +635,23 @@ export class BattleWorld {
       const cfg = hero.config;
       const outLv = this.heroSaves[hero.heroId]?.level || 1;
       const outBonus = 0.05 * (outLv - 1);
+      const weapon = getWeaponConfig(this.lordBonus.weaponId);
+      const tal = this.lordBonus.talismanEffects;
       const gemHeroBonus = (this.lordBonus.gemEffects.hero_dmg_pct || 0) / 100;
-      const gemBossBonus = (this.lordBonus.gemEffects.boss_dmg_pct || 0) / 100;
+      const gemBossBonus = (this.lordBonus.gemEffects.boss_dmg_pct || 0) / 100 + (tal?.bossDmgPct || 0) / 100;
       const gemFireBonus = (this.lordBonus.gemEffects.fire_dmg_pct || 0) / 100;
+      const setBonus = (this.lordBonus.setDamageBonusPct || 0) / 100;
+      const talHeroBonus = (tal?.heroDmgPct || 0) / 100;
+      const cmdMultiLv = this.lordSkillLevels['LS_MULTI'] || 0;
+      const cmdPierceLv = this.lordSkillLevels['LS_PIERCE'] || 0;
+      const cmdSpdLv = this.lordSkillLevels['LS_SPEED'] || 0;
+      const cmdCritLv = this.lordSkillLevels['LS_CRIT'] || 0;
+      const cmdFireLv = this.lordSkillLevels['LS_FIRE'] || 0;
+      const gemMulti = (this.lordBonus.gemEffects.lord_multishot || 0) + weapon.multishot;
+      const gemPierce = (this.lordBonus.gemEffects.lord_pierce || 0) + weapon.pierce;
 
-      let spdMult = this.getAuraSpeedFactor(hero.x, hero.y);
+      let spdMult = this.getAuraSpeedFactor(hero.x, hero.y)
+        * (1 + (this.lordBonus.gemEffects.hero_atk_speed || 0) / 100 + (tal?.heroAtkSpeedPct || 0) / 100 + 0.16 * cmdSpdLv);
       if (hero.heroId === 'H01') spdMult *= 1 + 0.25 * (hero.affixStacks['H01_A2'] || 0);
       if (hero.heroId === 'H08' && hero.affixStacks['H08_A4']) spdMult *= 1.33;
 
@@ -686,7 +664,7 @@ export class BattleWorld {
       hero.specialTimer += dt;
       if (hero.heroId === 'H08' && hero.affixStacks['H08_SW'] && hero.specialTimer >= 5.0) {
         hero.specialTimer = 0;
-        this.castLuBuSuper(hero, outBonus, gemHeroBonus, gemBossBonus);
+        this.castLuBuSuper(hero, outBonus, gemHeroBonus + setBonus + talHeroBonus, gemBossBonus);
       }
       if (hero.heroId === 'H11' && hero.affixStacks['H11_A1'] && hero.specialTimer >= 8.0) {
         hero.specialTimer = 0;
@@ -713,17 +691,23 @@ export class BattleWorld {
       hero.attackCount++;
       hero.attackAnimTimer = 0.2;
 
+      const distBonus = cfg.dimDistance === 'melee'
+        ? (this.lordBonus.gemEffects.melee_dmg_pct || 0) / 100
+        : cfg.dimDistance === 'ranged'
+          ? (this.lordBonus.gemEffects.ranged_dmg_pct || 0) / 100
+          : 0;
+
       const baseAtkParams: AttackCalcParams = {
         baseAtk: this.lordBonus.baseAtk,
         skillMultiplier: cfg.baseMultiplier,
         outLevelBonus: outBonus,
-        globalDmgPct: gemHeroBonus + hero.killBonusPct,
+        globalDmgPct: gemHeroBonus + setBonus + talHeroBonus + hero.killBonusPct + 0.18 * cmdMultiLv + 0.10 * gemMulti + 0.15 * cmdFireLv,
         elementDmgPct: cfg.dimElement === 'fire' ? gemFireBonus : 0,
-        distanceDmgPct: 0,
+        distanceDmgPct: distBonus,
         bossDmgPct: gemBossBonus,
-        armorPenetration: 0,
-        critRate: this.lordBonus.critRate,
-        critDmgBonus: this.lordBonus.globalCritDmgBonus,
+        armorPenetration: 0.15 * cmdPierceLv + 0.08 * gemPierce,
+        critRate: this.lordBonus.critRate + 0.10 * cmdCritLv + weapon.critRate + (tal?.critRatePct || 0) / 100,
+        critDmgBonus: this.lordBonus.globalCritDmgBonus + 0.25 * cmdCritLv + (tal?.critDmgPct || 0) / 100,
         dimDistance: cfg.dimDistance,
         dimElement: cfg.dimElement,
         canHitAir,
@@ -1151,7 +1135,20 @@ export class BattleWorld {
         m.attackCooldown -= dt;
         if (m.attackCooldown <= 0) {
           m.attackCooldown = 1.2;
-          this.damageWall(m.config.wallDmg * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1));
+          const rawDmg = m.config.wallDmg * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1);
+          this.damageWall(rawDmg);
+          const thornsPct = ((this.lordBonus.gemEffects.wall_thorns || 0) + (this.lordBonus.talismanEffects?.wallThornsPct || 0)) / 100;
+          if (thornsPct > 0 && !m.dead) {
+            const refl = Math.max(10, Math.round(rawDmg * thornsPct * 3));
+            m.hp -= refl;
+            this.floatTexts.push({ x: m.x, y: m.y + 20, text: `反震 ${refl}`, color: '#90CAF9', scale: 0.9 });
+            if (m.hp <= 0) {
+              m.dead = true;
+              this.kills++;
+              this.gainBattleExp(m.config.exp);
+              if (m.config.isBoss) this.bossKilled = true;
+            }
+          }
         }
         continue;
       }
@@ -1252,6 +1249,23 @@ export class BattleWorld {
     m.hp -= res.damage;
     m.hitFlashTimer = 0.1;
     this.damageStats[sourceId] = (this.damageStats[sourceId] || 0) + res.damage;
+
+    // 主公号令/神兵光环：全军武将命中概率触发落雷麻痹
+    if (sourceId !== 'LORD' && sourceId !== 'TOWER') {
+      const cmdThunder = this.lordSkillLevels['LS_THUNDER'] || 0;
+      const wpnThunder = getWeaponConfig(this.lordBonus.weaponId).thunderChance;
+      const tChance = Math.min(0.45, cmdThunder * 0.1 + wpnThunder * 0.5);
+      if (tChance > 0 && this.rng() < tChance) {
+        m.stunTimer = Math.max(m.stunTimer, 0.5);
+        if (this.vfxEvents.length < 120) {
+          this.vfxEvents.push({
+            type: 'lightning_chain', x: m.x, y: m.y + 40,
+            points: [{ x: m.x, y: m.y + 55 }, { x: m.x, y: m.y }],
+            color: '#B388FF', duration: 0.18,
+          });
+        }
+      }
+    }
 
     // 打击感：按单位顿帧（不做全局减速）+ 暴击分级击退 + 沿来向迸发火花
     const heavy = res.isCrit || atk.dimDistance === 'melee';
@@ -1671,12 +1685,13 @@ export class BattleWorld {
   public calcSettleReward(doubleReward = false): BattleReward {
     const win = this.phase === 'VICTORY';
     const mult = (doubleReward ? 2 : 1) * (this.challenge ? CHALLENGE_RULES.rewardMult : 1);
+    const talGoldMult = 1 + (this.lordBonus.talismanEffects?.goldBonusPct || 0) / 100;
     const s = this.stage.stageId;
     const baseGold = win ? 200 + s * 32 : Math.max(40, this.kills * 4);
     const shardHero = HERO_CONFIGS[(s + Math.floor(this.rng() * 3)) % HERO_CONFIGS.length].id;
 
     return {
-      gold: Math.round(baseGold * mult),
+      gold: Math.round(baseGold * mult * talGoldMult),
       diamond: Math.round((win ? (this.getStars() === 3 ? 30 : 15) : 0) * mult),
       forgeStone: Math.round((win ? 3 + Math.ceil(s * 0.45) : 1) * mult),
       refineStone: Math.round((win ? 2 : 0) * mult),
