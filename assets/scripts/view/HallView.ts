@@ -210,7 +210,9 @@ export class HallView {
     const mapBox = createUINode('StageMapCard', 560, 310, this.root, 0, 195);
     drawCardPanel(mapBox, 560, 310, '#221C2A', this.challengeMode ? '#FF7043' : '#C89B42', 16, 2);
 
-    const unlocked = stage.stageId <= p.maxClearedStage + 1;
+    // 测试阶段放开全部 1~50 关，暂注释通关前置关卡限制
+    // const unlocked = stage.stageId <= p.maxClearedStage + 1;
+    const unlocked = true;
     createLabel(mapBox, stage.desc, 19, '#EFEBE9', 0, 122, 510, 28, true);
 
     // 左右阵营对峙立绘（各自待机呼吸 + VS 脉冲）
@@ -232,16 +234,22 @@ export class HallView {
     createLabel(hintStrip, stage.bossHint, 16, unlocked ? '#FFE082' : '#FF8A65', 0, 0, 496, 40, true);
     createButton(mapBox, '?', 38, 38, '#3949AB', () => this.showStageInfoModal(stage.stageId), 244, 118, 20);
 
-    // 左右换关大箭头（横向轻浮动）
+    // 左右换关大箭头（横向轻浮动）+ 测试期快捷 -5/+5 跳关
     const prevBtn = createButton(this.root, '◀', 66, 96, this.selectedStageId > 1 ? '#2A2234' : '#3A3A44', () => {
       if (this.selectedStageId > 1) { this.selectedStageId--; this.render(); }
-    }, -326, 195, 28);
+    }, -326, 210, 28);
     if (this.selectedStageId > 1) attachIdleBreath(prevBtn.node, { mode: BreathMode.Float, horizontal: true, amp: -3, period: 1.1 });
+    createButton(this.root, '«-5', 66, 42, this.selectedStageId > 1 ? '#31263F' : '#3A3A44', () => {
+      if (this.selectedStageId > 1) { this.selectedStageId = Math.max(1, this.selectedStageId - 5); this.render(); }
+    }, -326, 126, 17);
 
     const nextBtn = createButton(this.root, '▶', 66, 96, this.selectedStageId < STAGE_CONFIGS.length ? '#2A2234' : '#3A3A44', () => {
       if (this.selectedStageId < STAGE_CONFIGS.length) { this.selectedStageId++; this.render(); }
-    }, 326, 195, 28);
+    }, 326, 210, 28);
     if (this.selectedStageId < STAGE_CONFIGS.length) attachIdleBreath(nextBtn.node, { mode: BreathMode.Float, horizontal: true, amp: 3, period: 1.1 });
+    createButton(this.root, '+5»', 66, 42, this.selectedStageId < STAGE_CONFIGS.length ? '#31263F' : '#3A3A44', () => {
+      if (this.selectedStageId < STAGE_CONFIGS.length) { this.selectedStageId = Math.min(STAGE_CONFIGS.length, this.selectedStageId + 5); this.render(); }
+    }, 326, 126, 17);
 
     // 6. 三星宝箱进度条（可领取宝箱附带轻晃动效）
     const boxPanel = createUINode('StarBoxes', 706, 142, this.root, 0, -48);

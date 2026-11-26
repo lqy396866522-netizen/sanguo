@@ -154,11 +154,8 @@ test('4. 点将台自由选位、拖拽换位冷却与端到端战役战斗模�
   world.selectRogueCard(heroCardIdx);
   assert.equal(world.phase, 'DEPLOY_PICK');
   assert.equal(world.placePendingHero(1), true);
-  // 天生1次 + 玉佩开局宝石1次 = 开局共2次三选一
-  while (world.phase === 'ROGUE_CHOICE' || world.phase === 'DEPLOY_PICK') {
-    if (world.phase === 'ROGUE_CHOICE') world.selectRogueCard(0);
-    if (world.phase === 'DEPLOY_PICK') world.autoPlacePendingHero();
-  }
+  // 开局仅选择 1 名首发武将，放置后即刻开战
+  assert.equal(world.deployedHeroes.size, 1);
   assert.equal(world.phase, 'PLAYING');
 
   // 移动到随机推荐位2成功，冷却内再次移动被拦截
@@ -248,8 +245,11 @@ test('7. 前50关专属曲折地图、随机坑位与任意空地自由放置/�
   const first10Signatures = new Set();
   const allSignatures = new Set();
   for (const st of STAGE_CONFIGS) {
-    assert.ok(st.paths.length >= 1);
+    assert.equal(st.paths.length, 1, `第${st.stageId}关应为单条路线`);
     assert.ok(st.paths[0].length >= 5, `第${st.stageId}关路径应包含多个弯道折点`);
+    for (const w of st.waves) {
+      assert.equal(w.pathIndex, 0, `第${st.stageId}关波次pathIndex应为0`);
+    }
     const sig = JSON.stringify(st.paths);
     if (st.stageId <= 10) first10Signatures.add(sig);
     allSignatures.add(sig);

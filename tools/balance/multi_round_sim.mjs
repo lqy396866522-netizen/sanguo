@@ -154,11 +154,14 @@ function runBattle(mgr, stageId, seed) {
   const world = new BattleWorld(stageId, mgr.profile.heroes, bonus, { seed });
   world.setAutoMode(true);
   let steps = 0;
-  const maxSteps = 30 * 240;
+  const maxSteps = 30 * 360;
   while (world.phase !== 'VICTORY' && world.phase !== 'DEFEAT' && world.phase !== 'REVIVE_ASK' && steps < maxSteps) {
     if (world.phase === 'ROGUE_CHOICE' && world.pendingRogueCards.length > 0) {
       const idx = pickCardIndex(stageId, world.pendingRogueCards, new Set(world.deployedHeroes.keys()));
       world.selectRogueCard(idx);
+    }
+    if (world.phase === 'CRISIS_CHOICE') {
+      world.selectCrisisOption(2);
     }
     if (world.phase === 'DEPLOY_PICK') {
       world.autoPlacePendingHero();

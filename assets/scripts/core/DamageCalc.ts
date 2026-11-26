@@ -14,6 +14,7 @@ export interface AttackCalcParams {
   dimDistance: DistanceDim;
   dimElement: ElementDim;
   canHitAir: boolean;
+  isAoeOrPierce?: boolean;  // AOE 或穿透攻击（用于盾兵减伤区分：普通-40%，AOE/穿透-20%）
   extraWeakBonus?: number;
   rng?: () => number;
 }
@@ -71,20 +72,27 @@ export function calculateDamage(atk: AttackCalcParams, target: TargetResistState
   // 6. 易伤乘区
   const vulnFactor = 1 + target.allVuln + (atk.dimDistance === 'magic' ? target.magicVuln : 0);
 
-  // 7. 暴击判定
+  // 7. 盾兵特性减伤：普通伤害 -40%，AOE/穿透伤害 -20%
+  let roleFactor = 1.0;
+  if (cfg.roleType === 'shield') {
+    roleFactor = atk.isAoeOrPierce ? 0.8 : 0.6;
+  }
+
+  // 8. 暴击与超级暴击判定（≥3x）
   const rand = atk.rng ? atk.rng() : Math.random();
   const isCrit = rand < Math.max(0, Math.min(0.95, atk.critRate));
   const critFactor = isCrit ? (1.5 + Math.max(0, atk.critDmgBonus)) : 1.0;
+  const isSuperCrit = isCrit && (critFactor >= 3.0 || (critFactor * weakFactor >= 2.8));
 
   const finalDamage = Math.max(
     1,
-    Math.round(rawSkill * dmgAmp * resistFactor * weakFactor * vulnFactor * critFactor)
+    Math.round(rawSkill * dmgAmp * resistFactor * weakFactor * vulnFactor * roleFactor * critFactor)
   );
 
   let tag: DamageResult['tag'] = 'normal';
   if (isCrit) tag = 'crit';
   else if (weakFactor > 1.05 || resistFactor > 1.15) tag = 'weak';
-  else if (resistFactor < 0.75) tag = 'resist';
+  else if (resistFactor < 0.75 || roleFactor < 0.7) tag = 'resist';
 
-  return { damage: finalDamage, isCrit, tag };
+  return { damage: finalDamage, isCrit, isSuperCrit, tag };
 }

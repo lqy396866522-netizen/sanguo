@@ -148,6 +148,8 @@ export const MONSTER_ART_KEY_MAP: Record<string, string> = {
   M_RATTAN: 'monster_rattan',
   M_SHIELD: 'monster_shield',
   M_CAVALRY: 'monster_cavalry',
+  M_MEDIC: 'monster_shaman',
+  M_ELITE_GEN: 'boss_huaxiong',
   M_AIR_KITE: 'monster_kite',
   M_SHAMAN: 'monster_shaman',
   M_CATAPULT: 'monster_catapult',

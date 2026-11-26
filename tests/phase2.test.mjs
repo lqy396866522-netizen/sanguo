@@ -280,12 +280,13 @@ test('20. 前50关商业化卡点验证：裸奔难通前10关，强化装备与
   assert.ok(p1 > p0 * 1.5, `强化后战力(${p1})应显著高于初始战力(${p0})`);
 
   const clearWorld = new BattleWorld(10, upMgr.profile.heroes, upMgr.getLordBattleBonus(), { seed: 10370 });
-  for (let i = 0; i < 30 * 240 && clearWorld.phase !== 'VICTORY' && clearWorld.phase !== 'DEFEAT' && clearWorld.phase !== 'REVIVE_ASK'; i++) {
+  for (let i = 0; i < 30 * 360 && clearWorld.phase !== 'VICTORY' && clearWorld.phase !== 'DEFEAT' && clearWorld.phase !== 'REVIVE_ASK'; i++) {
     if (clearWorld.phase === 'ROGUE_CHOICE' && clearWorld.pendingRogueCards.length > 0) {
       const pref = clearWorld.pendingRogueCards.findIndex((c) => c.type === 'NEW_HERO' && ['H12', 'H04', 'H02', 'H05'].includes(c.heroId || ''));
       const newIdx = pref >= 0 ? pref : clearWorld.pendingRogueCards.findIndex((c) => c.type === 'NEW_HERO');
       clearWorld.selectRogueCard(newIdx >= 0 ? newIdx : 0);
     }
+    if (clearWorld.phase === 'CRISIS_CHOICE') clearWorld.selectCrisisOption(2);
     if (clearWorld.phase === 'DEPLOY_PICK') clearWorld.autoPlacePendingHero();
     clearWorld.step(FIXED_DT);
   }

@@ -28,7 +28,7 @@ const SFX_VOLUME: Partial<Record<SfxKey, number>> = {
   sfx_crossbow: 0.35, sfx_hit: 0.4, sfx_spear: 0.55, sfx_slash: 0.55, sfx_fire: 0.55,
   sfx_thunder: 0.55, sfx_ice: 0.5, sfx_crit: 0.6, sfx_wall_hit: 0.7, sfx_click: 0.6,
 };
-const MAX_SFX_PER_WINDOW = 8;
+const MAX_SFX_PER_WINDOW = 6; // 微信小游戏同时发声上限 6 路
 const WINDOW_SEC = 0.12;
 const FADE_SEC = 0.8;
 const BGM_VOLUME = 0.45;
@@ -145,7 +145,7 @@ class AudioManagerImpl {
     this.fadeT = 0;
   }
 
-  public playSfx(key: SfxKey, volumeScale = 1): void {
+  public playSfx(key: SfxKey, volumeScale = 1, pitch = 1): void {
     if (!this.sfxOn || !this.sfxSrc) return;
     const variants = SFX_VARIANTS[key] ?? 1;
     const pick = variants > 1 ? Math.floor(Math.random() * variants) + 1 : 1;
@@ -161,6 +161,14 @@ class AudioManagerImpl {
     if (this.windowCount >= MAX_SFX_PER_WINDOW) return;
     this.windowCount++;
     this.lastPlay.set(key, this.now);
+    try {
+      const anySrc = this.sfxSrc as any;
+      if (typeof anySrc._player?.setPlaybackRate === 'function') {
+        anySrc._player.setPlaybackRate(Math.max(0.7, Math.min(1.6, pitch)));
+      }
+    } catch {
+      // 微信小游戏部分机型不支持动态变调，静默降级
+    }
     this.sfxSrc.playOneShot(clip, (SFX_VOLUME[key] ?? 0.8) * volumeScale);
   }
 

@@ -88,7 +88,7 @@ export const LORD_SKILLS: LordSkillConfig[] = [
 export const HERO_CONFIGS: HeroConfig[] = [
   {
     id: 'H01', name: '赵云', title: '常山赵子龙', camp: '蜀', roleLabel: '近战穿刺',
-    range: 155, rangeLabel: '短', attackInterval: 0.625, canHitAir: false,
+    range: 155, rangeLabel: '短', attackInterval: 1.05, canHitAir: false,
     dimDistance: 'melee', dimElement: 'physical', baseMultiplier: 1.55,
     skillName: '龙胆穿刺', skillDesc: '短射程高频刺出银色枪芒，直线穿透最多3名地面敌军',
     unlockType: 'INIT', unlockParam: 0, colorHex: '#4FC3F7',
@@ -102,7 +102,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H02', name: '黄忠', title: '老当益壮', camp: '蜀', roleLabel: '超远程对空',
-    range: 560, rangeLabel: '超长', attackInterval: 1.25, canHitAir: true,
+    range: 360, rangeLabel: '超长', attackInterval: 2.0, canHitAir: true,
     dimDistance: 'ranged', dimElement: 'physical', baseMultiplier: 2.15,
     skillName: '百步穿杨', skillDesc: '超远距离射出金羽重箭，可对空狙击，越远伤害越高',
     unlockType: 'INIT', unlockParam: 0, colorHex: '#FFD54F',
@@ -116,7 +116,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H03', name: '张飞', title: '万人敌', camp: '蜀', roleLabel: '近战眩晕',
-    range: 165, rangeLabel: '短', attackInterval: 1.1, canHitAir: false,
+    range: 165, rangeLabel: '短', attackInterval: 1.75, canHitAir: false,
     dimDistance: 'melee', dimElement: 'physical', baseMultiplier: 1.45,
     skillName: '丈八横扫', skillDesc: '挥舞蛇矛横扫前方扇形敌群，震慑减速与击退',
     unlockType: 'STAGE_CLEAR', unlockParam: 1, colorHex: '#FF7043',
@@ -130,7 +130,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H04', name: '周瑜', title: '江东大都督', camp: '吴', roleLabel: '火海AOE',
-    range: 360, rangeLabel: '中', attackInterval: 1.45, canHitAir: true,
+    range: 265, rangeLabel: '中', attackInterval: 2.35, canHitAir: true,
     dimDistance: 'magic', dimElement: 'fire', baseMultiplier: 1.25,
     skillName: '火烧赤壁', skillDesc: '投掷令旗引爆持续3秒的烈焰火海，天克藤甲重盾',
     unlockType: 'LORD_LEVEL', unlockParam: 6, colorHex: '#FF5252',
@@ -144,7 +144,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H05', name: '诸葛亮', title: '卧龙先生', camp: '蜀', roleLabel: '雷电推退',
-    range: 480, rangeLabel: '长', attackInterval: 1.25, canHitAir: true,
+    range: 320, rangeLabel: '长', attackInterval: 2.0, canHitAir: true,
     dimDistance: 'magic', dimElement: 'lightning', baseMultiplier: 1.6,
     skillName: '九天引雷', skillDesc: '召唤青紫闪电链在空中与地面敌军间连续弹射',
     unlockType: 'STAGE_CLEAR', unlockParam: 4, colorHex: '#7C4DFF',
@@ -158,7 +158,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H06', name: '郭嘉', title: '鬼才奉孝', camp: '魏', roleLabel: '寒冰控场',
-    range: 340, rangeLabel: '中', attackInterval: 1.05, canHitAir: true,
+    range: 255, rangeLabel: '中', attackInterval: 1.7, canHitAir: true,
     dimDistance: 'magic', dimElement: 'ice', baseMultiplier: 1.2,
     skillName: '十胜寒冰', skillDesc: '发射冰晶炸开寒冰领域，减速并冻结高速铁骑',
     unlockType: 'LORD_LEVEL', unlockParam: 9, colorHex: '#40C4FF',
@@ -172,7 +172,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H07', name: '关羽', title: '武圣云长', camp: '蜀', roleLabel: '刀气破甲',
-    range: 225, rangeLabel: '短中', attackInterval: 1.0, canHitAir: false,
+    range: 210, rangeLabel: '短中', attackInterval: 1.6, canHitAir: false,
     dimDistance: 'melee', dimElement: 'physical', baseMultiplier: 1.85,
     skillName: '青龙偃月', skillDesc: '劈出向前推进的青龙刀气，专破大盾锐士高额物抗',
     unlockType: 'STAGE_CLEAR', unlockParam: 3, colorHex: '#66BB6A',
@@ -186,7 +186,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H08', name: '吕布', title: '无双战神', camp: '群', roleLabel: '暴击斩杀',
-    range: 240, rangeLabel: '短中', attackInterval: 1.0, canHitAir: false,
+    range: 215, rangeLabel: '短中', attackInterval: 1.6, canHitAir: false,
     dimDistance: 'melee', dimElement: 'physical', baseMultiplier: 1.8,
     skillName: '方天画戟', skillDesc: '重砸地面掀起血红冲击波，自带高暴击与低血斩杀',
     unlockType: 'SHARDS', unlockParam: 50, colorHex: '#E53935',
@@ -200,8 +200,8 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H09', name: '貂蝉', title: '闭月倾城', camp: '群', roleLabel: '魅惑光环',
-    range: 320, rangeLabel: '中', attackInterval: 1.0, canHitAir: true,
-    dimDistance: 'magic', dimElement: 'physical', baseMultiplier: 0.9,
+    range: 245, rangeLabel: '中', attackInterval: 1.6, canHitAir: true,
+    dimDistance: 'magic', dimElement: 'physical', baseMultiplier: 1.15,
     skillName: '倾国之舞', skillDesc: '抛射花瓣球魅惑敌军停滞，并赋予射程内友军攻速光环',
     unlockType: 'LORD_LEVEL', unlockParam: 13, colorHex: '#F48FB1',
     affixes: [
@@ -214,8 +214,8 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H10', name: '华佗', title: '神医妙手', camp: '群', roleLabel: '回血减抗',
-    range: 340, rangeLabel: '中', attackInterval: 1.25, canHitAir: true,
-    dimDistance: 'magic', dimElement: 'poison', baseMultiplier: 0.85,
+    range: 255, rangeLabel: '中', attackInterval: 2.0, canHitAir: true,
+    dimDistance: 'magic', dimElement: 'poison', baseMultiplier: 1.2,
     skillName: '青囊毒针', skillDesc: '银针降低目标全抗性，且每5次攻击回复主公城防血量',
     unlockType: 'LORD_LEVEL', unlockParam: 17, colorHex: '#80CBC4',
     affixes: [
@@ -228,7 +228,7 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H11', name: '黄月英', title: '奇门巧匠', camp: '蜀', roleLabel: '机关连弩',
-    range: 420, rangeLabel: '长', attackInterval: 0.8, canHitAir: true,
+    range: 295, rangeLabel: '长', attackInterval: 1.35, canHitAir: true,
     dimDistance: 'ranged', dimElement: 'physical', baseMultiplier: 0.65,
     skillName: '诸葛连弩', skillDesc: '架设机关炮台3连射弩箭，可召唤自爆木牛清线',
     unlockType: 'LORD_LEVEL', unlockParam: 22, colorHex: '#FFB74D',
@@ -242,8 +242,8 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H12', name: '贾诩', title: '毒士文和', camp: '魏', roleLabel: '毒瘴禁疗',
-    range: 450, rangeLabel: '长', attackInterval: 1.4, canHitAir: true,
-    dimDistance: 'magic', dimElement: 'poison', baseMultiplier: 0.75,
+    range: 305, rangeLabel: '长', attackInterval: 2.25, canHitAir: true,
+    dimDistance: 'magic', dimElement: 'poison', baseMultiplier: 1.05,
     skillName: '乱武毒瘴', skillDesc: '在敌群脚下布下持续4秒剧毒沼泽，克制高血量与回血Boss',
     unlockType: 'LORD_LEVEL', unlockParam: 27, colorHex: '#AB47BC',
     affixes: [
@@ -258,28 +258,46 @@ export const HERO_CONFIGS: HeroConfig[] = [
 
 export const MONSTER_CONFIGS: Record<string, MonsterConfig> = {
   M_INFANTRY: {
-    id: 'M_INFANTRY', name: '黄巾步卒', space: 'ground', speed: 54, baseHp: 300, wallDmg: 40, exp: 18, radius: 18,
+    id: 'M_INFANTRY', name: '黄巾步卒', space: 'ground', speed: 54, baseHp: 300, wallDmg: 52, exp: 1, radius: 18,
+    roleType: 'normal', wallLeakPct: 0.01,
     resistMelee: 0, resistRanged: 0, resistMagic: 0,
     resistPhysical: 0, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
     colorHex: '#D4A359',
   },
   M_RATTAN: {
-    id: 'M_RATTAN', name: '藤甲重盾', space: 'ground', speed: 40, baseHp: 520, wallDmg: 70, exp: 26, radius: 22,
+    id: 'M_RATTAN', name: '藤甲重盾', space: 'ground', speed: 40, baseHp: 520, wallDmg: 70, exp: 2, radius: 22,
+    roleType: 'shield', wallLeakPct: 0.01,
     resistMelee: 0.1, resistRanged: 0.1, resistMagic: 0,
     resistPhysical: 0.55, resistFire: -0.5, resistLightning: 0, resistIce: 0, resistPoison: 0,
     weakElement: 'fire', colorHex: '#5D4037',
   },
   M_SHIELD: {
-    id: 'M_SHIELD', name: '大盾锐士', space: 'ground', speed: 42, baseHp: 480, wallDmg: 65, exp: 24, radius: 22,
-    resistMelee: -0.3, resistRanged: 0.55, resistMagic: 0.1,
+    id: 'M_SHIELD', name: '大盾锐士', space: 'ground', speed: 49, baseHp: 900, wallDmg: 52, exp: 2, radius: 22,
+    roleType: 'shield', wallLeakPct: 0.01,
+    resistMelee: -0.3, resistRanged: 0.45, resistMagic: 0.1,
     resistPhysical: 0.1, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
     weakDistance: 'melee', colorHex: '#607D8B',
   },
   M_CAVALRY: {
-    id: 'M_CAVALRY', name: '西凉铁骑', space: 'ground', speed: 96, baseHp: 480, wallDmg: 70, exp: 20, radius: 20,
+    id: 'M_CAVALRY', name: '西凉铁骑', space: 'ground', speed: 97, baseHp: 600, wallDmg: 104, exp: 2, radius: 20,
+    roleType: 'cavalry', wallLeakPct: 0.02,
     resistMelee: 0, resistRanged: 0, resistMagic: 0,
     resistPhysical: 0, resistFire: 0, resistLightning: 0, resistIce: -0.3, resistPoison: 0,
     weakElement: 'ice', colorHex: '#8D6E63',
+  },
+  M_MEDIC: {
+    id: 'M_MEDIC', name: '随军医官', space: 'ground', speed: 49, baseHp: 750, wallDmg: 52, exp: 2, radius: 20,
+    roleType: 'medic', wallLeakPct: 0.01, healPctPerSec: 0.03, healRadius: 150,
+    resistMelee: 0, resistRanged: 0, resistMagic: 0.15,
+    resistPhysical: 0, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: -0.25,
+    weakElement: 'poison', colorHex: '#26A69A',
+  },
+  M_ELITE_GEN: {
+    id: 'M_ELITE_GEN', name: '敌军精英将领', space: 'ground', speed: 46, baseHp: 4500, wallDmg: 260, exp: 10, radius: 28,
+    roleType: 'elite', wallLeakPct: 0.05, dropChest: true,
+    resistMelee: 0.05, resistRanged: 0.05, resistMagic: 0.05,
+    resistPhysical: 0.05, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
+    colorHex: '#FF7043',
   },
   M_AIR_KITE: {
     id: 'M_AIR_KITE', name: '机关木鸢', space: 'air', speed: 74, baseHp: 440, wallDmg: 65, exp: 20, radius: 19,
@@ -365,7 +383,7 @@ export const MONSTER_CONFIGS: Record<string, MonsterConfig> = {
   },
 };
 
-// 10 关 10 套独立曲折道路（每关弯道形状、拐点数量与主题风格均不相同）
+// 10 关 10 套独立曲折单道路（每关弯道形状、拐点数量与主题风格均不相同）
 const PATH_S1_U = [
   { x: 150, y: 1120 },
   { x: 150, y: 880 },
@@ -375,21 +393,13 @@ const PATH_S1_U = [
   { x: 200, y: 380 },
   { x: 375, y: 285 },
 ];
-const PATH_S2_L = [
+const PATH_S2_SNAKE = [
   { x: 140, y: 1120 },
-  { x: 340, y: 950 },
-  { x: 130, y: 740 },
-  { x: 360, y: 540 },
-  { x: 250, y: 360 },
-  { x: 340, y: 285 },
-];
-const PATH_S2_R = [
-  { x: 610, y: 1120 },
-  { x: 410, y: 950 },
-  { x: 620, y: 740 },
-  { x: 390, y: 540 },
-  { x: 500, y: 360 },
-  { x: 410, y: 285 },
+  { x: 590, y: 990 },
+  { x: 140, y: 820 },
+  { x: 590, y: 650 },
+  { x: 160, y: 470 },
+  { x: 375, y: 285 },
 ];
 const PATH_S3_ZIGZAG = [
   { x: 600, y: 1120 },
@@ -400,40 +410,23 @@ const PATH_S3_ZIGZAG = [
   { x: 590, y: 430 },
   { x: 375, y: 285 },
 ];
-const PATH_S4_L = [
-  { x: 130, y: 1120 },
-  { x: 130, y: 780 },
-  { x: 310, y: 650 },
-  { x: 180, y: 450 },
-  { x: 340, y: 285 },
-];
-const PATH_S4_C = [
+const PATH_S4_LOOP = [
   { x: 375, y: 1120 },
-  { x: 490, y: 900 },
-  { x: 260, y: 710 },
-  { x: 480, y: 510 },
+  { x: 140, y: 990 },
+  { x: 140, y: 730 },
+  { x: 600, y: 730 },
+  { x: 600, y: 510 },
+  { x: 220, y: 410 },
   { x: 375, y: 285 },
 ];
-const PATH_S4_R = [
-  { x: 620, y: 1120 },
-  { x: 620, y: 780 },
-  { x: 440, y: 650 },
-  { x: 570, y: 450 },
-  { x: 410, y: 285 },
-];
-const PATH_S5_L = [
-  { x: 240, y: 1120 },
-  { x: 120, y: 900 },
-  { x: 260, y: 670 },
-  { x: 120, y: 460 },
-  { x: 320, y: 285 },
-];
-const PATH_S5_R = [
-  { x: 510, y: 1120 },
-  { x: 630, y: 900 },
-  { x: 490, y: 670 },
-  { x: 630, y: 460 },
-  { x: 430, y: 285 },
+const PATH_S5_GRANARY = [
+  { x: 580, y: 1120 },
+  { x: 200, y: 1020 },
+  { x: 580, y: 860 },
+  { x: 580, y: 640 },
+  { x: 160, y: 640 },
+  { x: 160, y: 420 },
+  { x: 375, y: 285 },
 ];
 const PATH_S6_HAIRPIN = [
   { x: 140, y: 1120 },
@@ -444,21 +437,14 @@ const PATH_S6_HAIRPIN = [
   { x: 540, y: 370 },
   { x: 375, y: 285 },
 ];
-const PATH_S7_BRIDGE_L = [
+const PATH_S7_BRIDGE = [
   { x: 170, y: 1120 },
-  { x: 170, y: 860 },
-  { x: 320, y: 760 },
-  { x: 180, y: 560 },
-  { x: 320, y: 390 },
-  { x: 345, y: 285 },
-];
-const PATH_S7_BRIDGE_R = [
-  { x: 580, y: 1120 },
-  { x: 580, y: 860 },
-  { x: 430, y: 760 },
-  { x: 570, y: 560 },
-  { x: 430, y: 390 },
-  { x: 405, y: 285 },
+  { x: 170, y: 930 },
+  { x: 460, y: 840 },
+  { x: 460, y: 640 },
+  { x: 180, y: 550 },
+  { x: 530, y: 400 },
+  { x: 375, y: 285 },
 ];
 const PATH_S8_GOURD = [
   { x: 375, y: 1120 },
@@ -470,30 +456,23 @@ const PATH_S8_GOURD = [
   { x: 375, y: 285 },
 ];
 const PATH_S9_SPIRAL = [
-  { x: 600, y: 1120 },
-  { x: 150, y: 1030 },
-  { x: 150, y: 520 },
-  { x: 560, y: 520 },
-  { x: 560, y: 780 },
-  { x: 320, y: 780 },
-  { x: 320, y: 380 },
+  { x: 580, y: 1120 },
+  { x: 170, y: 1010 },
+  { x: 170, y: 800 },
+  { x: 560, y: 740 },
+  { x: 560, y: 540 },
+  { x: 200, y: 470 },
   { x: 375, y: 285 },
 ];
-const PATH_S10_BAGUA_L = [
-  { x: 300, y: 1120 },
-  { x: 130, y: 960 },
-  { x: 130, y: 620 },
-  { x: 320, y: 500 },
-  { x: 180, y: 370 },
-  { x: 340, y: 285 },
-];
-const PATH_S10_BAGUA_R = [
-  { x: 450, y: 1120 },
-  { x: 620, y: 960 },
-  { x: 620, y: 620 },
-  { x: 430, y: 500 },
-  { x: 570, y: 370 },
-  { x: 410, y: 285 },
+const PATH_S10_BAGUA = [
+  { x: 220, y: 1120 },
+  { x: 600, y: 1020 },
+  { x: 600, y: 740 },
+  { x: 200, y: 740 },
+  { x: 200, y: 500 },
+  { x: 540, y: 500 },
+  { x: 460, y: 370 },
+  { x: 375, y: 285 },
 ];
 
 const SLOTS_6: StageConfig['slots'] = [
@@ -522,23 +501,23 @@ export const STAGE_CONFIGS: StageConfig[] = [
     paths: [PATH_S1_U], slots: SLOTS_6, bossId: 'BOSS_ZHANGBO',
     bossHint: '弱点：无明显抗性，推荐把赵云放在U型拐角处！', bgTheme: '#496E4B', mapTheme: 'peach',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_INFANTRY', count: 8,  interval: 1.1, pathIndex: 0, hpScale: 0.9 },
-      { waveIndex: 2, delay: 11, monsterId: 'M_INFANTRY', count: 10, interval: 0.9, pathIndex: 0, hpScale: 1.0 },
-      { waveIndex: 3, delay: 23, monsterId: 'M_SHIELD',   count: 4,  interval: 1.5, pathIndex: 0, hpScale: 0.9 },
-      { waveIndex: 4, delay: 32, monsterId: 'M_INFANTRY', count: 12, interval: 0.8, pathIndex: 0, hpScale: 1.1 },
-      { waveIndex: 5, delay: 44, monsterId: 'BOSS_ZHANGBO', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.0 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_INFANTRY', count: 6,  interval: 1.7, pathIndex: 0, hpScale: 1.0 },
+      { waveIndex: 2, delay: 14, monsterId: 'M_INFANTRY', count: 7,  interval: 1.4, pathIndex: 0, hpScale: 1.05 },
+      { waveIndex: 3, delay: 28, monsterId: 'M_SHIELD',   count: 3,  interval: 2.0, pathIndex: 0, hpScale: 0.75 },
+      { waveIndex: 4, delay: 38, monsterId: 'M_INFANTRY', count: 8,  interval: 1.2, pathIndex: 0, hpScale: 1.1 },
+      { waveIndex: 5, delay: 52, monsterId: 'BOSS_ZHANGBO', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.55 },
     ],
   },
   {
-    stageId: 2, name: '广宗破黄巾', desc: '双路蛇形S弯，黄巾巫祝助阵回血。', costStamina: 5,
-    paths: [PATH_S2_L, PATH_S2_R], slots: SLOTS_6, bossId: 'BOSS_ZHANGJIAO',
+    stageId: 2, name: '广宗破黄巾', desc: '蛇形S弯古道，黄巾巫祝助阵回血。', costStamina: 5,
+    paths: [PATH_S2_SNAKE], slots: SLOTS_6, bossId: 'BOSS_ZHANGJIAO',
     bossHint: '巫祝法抗高且会加血，建议物理点杀。', bgTheme: '#46415E', mapTheme: 'desert',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_INFANTRY', count: 10, interval: 0.9, pathIndex: 0, hpScale: 1.1 },
-      { waveIndex: 2, delay: 12, monsterId: 'M_SHAMAN',   count: 5,  interval: 1.4, pathIndex: 1, hpScale: 1.0 },
-      { waveIndex: 3, delay: 22, monsterId: 'M_CAVALRY',  count: 8,  interval: 0.9, pathIndex: 0, hpScale: 1.1 },
-      { waveIndex: 4, delay: 33, monsterId: 'M_INFANTRY', count: 14, interval: 0.7, pathIndex: 1, hpScale: 1.2 },
-      { waveIndex: 5, delay: 46, monsterId: 'BOSS_ZHANGJIAO', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.0 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_INFANTRY', count: 8,  interval: 1.2, pathIndex: 0, hpScale: 1.0 },
+      { waveIndex: 2, delay: 13, monsterId: 'M_SHAMAN',   count: 4,  interval: 1.7, pathIndex: 0, hpScale: 0.75 },
+      { waveIndex: 3, delay: 24, monsterId: 'M_CAVALRY',  count: 6,  interval: 1.2, pathIndex: 0, hpScale: 0.85 },
+      { waveIndex: 4, delay: 35, monsterId: 'M_INFANTRY', count: 10, interval: 1.0, pathIndex: 0, hpScale: 1.1 },
+      { waveIndex: 5, delay: 49, monsterId: 'BOSS_ZHANGJIAO', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.5 },
     ],
   },
   {
@@ -546,36 +525,36 @@ export const STAGE_CONFIGS: StageConfig[] = [
     paths: [PATH_S3_ZIGZAG], slots: SLOTS_6, bossId: 'BOSS_HUAXIONG',
     bossHint: '大盾兵与华雄远程抗性极高，需派近战卡之字拐角！', bgTheme: '#523443', mapTheme: 'cliff',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_INFANTRY', count: 6,  interval: 0.9, pathIndex: 0, hpScale: 1.0 },
-      { waveIndex: 2, delay: 7,  monsterId: 'M_SHIELD',   count: 8,  interval: 1.1, pathIndex: 0, hpScale: 1.1 },
-      { waveIndex: 3, delay: 19, monsterId: 'M_INFANTRY', count: 10, interval: 0.8, pathIndex: 0, hpScale: 1.2 },
-      { waveIndex: 4, delay: 30, monsterId: 'M_SHIELD',   count: 10, interval: 1.0, pathIndex: 0, hpScale: 1.2 },
-      { waveIndex: 5, delay: 43, monsterId: 'M_BOMBER',   count: 8,  interval: 0.9, pathIndex: 0, hpScale: 1.2 },
-      { waveIndex: 6, delay: 52, monsterId: 'BOSS_HUAXIONG', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.0 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_INFANTRY', count: 6,  interval: 1.1, pathIndex: 0, hpScale: 1.0 },
+      { waveIndex: 2, delay: 9,  monsterId: 'M_SHIELD',   count: 6,  interval: 1.3, pathIndex: 0, hpScale: 0.85 },
+      { waveIndex: 3, delay: 20, monsterId: 'M_INFANTRY', count: 8,  interval: 1.0, pathIndex: 0, hpScale: 1.1 },
+      { waveIndex: 4, delay: 32, monsterId: 'M_SHIELD',   count: 8,  interval: 1.2, pathIndex: 0, hpScale: 0.9 },
+      { waveIndex: 5, delay: 45, monsterId: 'M_BOMBER',   count: 6,  interval: 1.1, pathIndex: 0, hpScale: 0.95 },
+      { waveIndex: 6, delay: 54, monsterId: 'BOSS_HUAXIONG', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.6 },
     ],
   },
   {
-    stageId: 4, name: '虎牢关', desc: '三岔回环关隘，西凉铁骑与吕布压阵。', costStamina: 5,
-    paths: [PATH_S4_L, PATH_S4_R, PATH_S4_C], slots: SLOTS_8, bossId: 'BOSS_LUBU',
+    stageId: 4, name: '虎牢关', desc: '险峻回环关隘，西凉铁骑与吕布压阵。', costStamina: 5,
+    paths: [PATH_S4_LOOP], slots: SLOTS_8, bossId: 'BOSS_LUBU',
     bossHint: '铁骑极快，吕布半血狂暴，建议带控场+近战。', bgTheme: '#5C2E2E', mapTheme: 'fortress',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_CAVALRY',  count: 10, interval: 0.8, pathIndex: 0, hpScale: 2.15 },
-      { waveIndex: 2, delay: 11, monsterId: 'M_SHIELD',   count: 8,  interval: 1.1, pathIndex: 2, hpScale: 2.25 },
-      { waveIndex: 3, delay: 23, monsterId: 'M_CAVALRY',  count: 12, interval: 0.7, pathIndex: 1, hpScale: 2.3 },
-      { waveIndex: 4, delay: 36, monsterId: 'M_SHAMAN',   count: 6,  interval: 1.2, pathIndex: 2, hpScale: 2.3 },
-      { waveIndex: 5, delay: 48, monsterId: 'BOSS_LUBU',  count: 1,  interval: 1.0, pathIndex: 2, isBoss: true, hpScale: 1.75 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_CAVALRY',  count: 8,  interval: 0.95, pathIndex: 0, hpScale: 1.25 },
+      { waveIndex: 2, delay: 11, monsterId: 'M_SHIELD',   count: 6,  interval: 1.2,  pathIndex: 0, hpScale: 1.3 },
+      { waveIndex: 3, delay: 23, monsterId: 'M_CAVALRY',  count: 10, interval: 0.85, pathIndex: 0, hpScale: 1.35 },
+      { waveIndex: 4, delay: 36, monsterId: 'M_SHAMAN',   count: 5,  interval: 1.3,  pathIndex: 0, hpScale: 1.35 },
+      { waveIndex: 5, delay: 48, monsterId: 'BOSS_LUBU',  count: 1,  interval: 1.0,  pathIndex: 0, isBoss: true, hpScale: 0.85 },
     ],
   },
   {
-    stageId: 5, name: '官渡粮仓', desc: '双翼绕仓曲道，空中木鸢首次成群袭城！', costStamina: 5,
-    paths: [PATH_S5_L, PATH_S5_R], slots: SLOTS_8, bossId: 'BOSS_WENCHOU',
-    bossHint: '必须保留足够可对空武将（黄忠/诸葛亮/主公）。', bgTheme: '#2C4257', mapTheme: 'camp',
+    stageId: 5, name: '官渡粮仓', desc: '绕仓曲折粮道，空中木鸢首次成群袭城！', costStamina: 5,
+    paths: [PATH_S5_GRANARY], slots: SLOTS_8, bossId: 'BOSS_WENCHOU',
+    bossHint: '必须保留足够可对空武将（黄忠/诸葛亮）。', bgTheme: '#2C4257', mapTheme: 'camp',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_AIR_KITE', count: 14, interval: 0.7, pathIndex: 0, hpScale: 3.4 },
-      { waveIndex: 2, delay: 11, monsterId: 'M_CAVALRY',  count: 14, interval: 0.65, pathIndex: 1, hpScale: 3.6 },
-      { waveIndex: 3, delay: 23, monsterId: 'M_AIR_KITE', count: 18, interval: 0.55, pathIndex: 1, hpScale: 3.6 },
-      { waveIndex: 4, delay: 35, monsterId: 'M_BOMBER',   count: 14, interval: 0.65, pathIndex: 0, hpScale: 3.6 },
-      { waveIndex: 5, delay: 47, monsterId: 'BOSS_WENCHOU', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 2.85 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_AIR_KITE', count: 12, interval: 0.8, pathIndex: 0, hpScale: 1.95 },
+      { waveIndex: 2, delay: 12, monsterId: 'M_CAVALRY',  count: 12, interval: 0.75, pathIndex: 0, hpScale: 2.05 },
+      { waveIndex: 3, delay: 24, monsterId: 'M_AIR_KITE', count: 14, interval: 0.65, pathIndex: 0, hpScale: 2.05 },
+      { waveIndex: 4, delay: 36, monsterId: 'M_BOMBER',   count: 12, interval: 0.75, pathIndex: 0, hpScale: 2.05 },
+      { waveIndex: 5, delay: 48, monsterId: 'BOSS_WENCHOU', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.45 },
     ],
   },
   {
@@ -583,23 +562,23 @@ export const STAGE_CONFIGS: StageConfig[] = [
     paths: [PATH_S6_HAIRPIN], slots: SLOTS_8, bossId: 'BOSS_CAOREN',
     bossHint: '藤甲兵与曹仁物抗极高，弱点为火攻与法术！', bgTheme: '#4A3B2B', mapTheme: 'forest',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_RATTAN',   count: 12, interval: 0.9, pathIndex: 0, hpScale: 3.6 },
-      { waveIndex: 2, delay: 12, monsterId: 'M_CAVALRY',  count: 12, interval: 0.7, pathIndex: 0, hpScale: 3.8 },
-      { waveIndex: 3, delay: 24, monsterId: 'M_RATTAN',   count: 14, interval: 0.8, pathIndex: 0, hpScale: 3.8 },
-      { waveIndex: 4, delay: 37, monsterId: 'M_SHAMAN',   count: 7,  interval: 1.0, pathIndex: 0, hpScale: 3.8 },
-      { waveIndex: 5, delay: 48, monsterId: 'BOSS_CAOREN', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 2.6 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_RATTAN',   count: 10, interval: 0.95, pathIndex: 0, hpScale: 3.1 },
+      { waveIndex: 2, delay: 12, monsterId: 'M_CAVALRY',  count: 10, interval: 0.75, pathIndex: 0, hpScale: 3.25 },
+      { waveIndex: 3, delay: 24, monsterId: 'M_RATTAN',   count: 12, interval: 0.85, pathIndex: 0, hpScale: 3.25 },
+      { waveIndex: 4, delay: 37, monsterId: 'M_SHAMAN',   count: 6,  interval: 1.05, pathIndex: 0, hpScale: 3.25 },
+      { waveIndex: 5, delay: 48, monsterId: 'BOSS_CAOREN', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 2.5 },
     ],
   },
   {
-    stageId: 7, name: '赤壁前哨', desc: '水上双曲栈桥，蔡瑁统领木鸢舰队。', costStamina: 5,
-    paths: [PATH_S7_BRIDGE_L, PATH_S7_BRIDGE_R], slots: SLOTS_8, bossId: 'BOSS_CAIMAO',
+    stageId: 7, name: '赤壁前哨', desc: '水上曲折栈桥，蔡瑁统领木鸢舰队。', costStamina: 5,
+    paths: [PATH_S7_BRIDGE], slots: SLOTS_8, bossId: 'BOSS_CAIMAO',
     bossHint: '周瑜火海+黄忠防空最佳组合。', bgTheme: '#1F445C', mapTheme: 'river',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_AIR_KITE', count: 12, interval: 0.8, pathIndex: 0, hpScale: 2.2 },
-      { waveIndex: 2, delay: 13, monsterId: 'M_RATTAN',   count: 10, interval: 1.0, pathIndex: 1, hpScale: 2.4 },
-      { waveIndex: 3, delay: 26, monsterId: 'M_AIR_KITE', count: 15, interval: 0.7, pathIndex: 1, hpScale: 2.4 },
-      { waveIndex: 4, delay: 39, monsterId: 'M_BOMBER',   count: 12, interval: 0.8, pathIndex: 0, hpScale: 2.4 },
-      { waveIndex: 5, delay: 52, monsterId: 'BOSS_CAIMAO', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.6 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_AIR_KITE', count: 10, interval: 0.85, pathIndex: 0, hpScale: 1.25 },
+      { waveIndex: 2, delay: 13, monsterId: 'M_RATTAN',   count: 9,  interval: 1.05, pathIndex: 0, hpScale: 1.35 },
+      { waveIndex: 3, delay: 26, monsterId: 'M_AIR_KITE', count: 13, interval: 0.75, pathIndex: 0, hpScale: 1.35 },
+      { waveIndex: 4, delay: 39, monsterId: 'M_BOMBER',   count: 10, interval: 0.85, pathIndex: 0, hpScale: 1.35 },
+      { waveIndex: 5, delay: 52, monsterId: 'BOSS_CAIMAO', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.9 },
     ],
   },
   {
@@ -607,11 +586,11 @@ export const STAGE_CONFIGS: StageConfig[] = [
     paths: [PATH_S8_GOURD], slots: SLOTS_8, bossId: 'BOSS_XIAHOUDUN',
     bossHint: '警惕投石车远距砸墙，优先后排远程点杀。', bgTheme: '#4A3939', mapTheme: 'valley',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_CATAPULT', count: 5,  interval: 1.8, pathIndex: 0, hpScale: 2.4 },
-      { waveIndex: 2, delay: 12, monsterId: 'M_CAVALRY',  count: 14, interval: 0.7, pathIndex: 0, hpScale: 2.5 },
-      { waveIndex: 3, delay: 25, monsterId: 'M_CATAPULT', count: 6,  interval: 1.6, pathIndex: 0, hpScale: 2.6 },
-      { waveIndex: 4, delay: 38, monsterId: 'M_SHIELD',   count: 12, interval: 0.9, pathIndex: 0, hpScale: 2.6 },
-      { waveIndex: 5, delay: 52, monsterId: 'BOSS_XIAHOUDUN', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.65 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_CATAPULT', count: 5,  interval: 1.8, pathIndex: 0, hpScale: 1.35 },
+      { waveIndex: 2, delay: 12, monsterId: 'M_CAVALRY',  count: 12, interval: 0.75, pathIndex: 0, hpScale: 1.45 },
+      { waveIndex: 3, delay: 25, monsterId: 'M_CATAPULT', count: 5,  interval: 1.6, pathIndex: 0, hpScale: 1.5 },
+      { waveIndex: 4, delay: 38, monsterId: 'M_SHIELD',   count: 10, interval: 0.95, pathIndex: 0, hpScale: 1.5 },
+      { waveIndex: 5, delay: 52, monsterId: 'BOSS_XIAHOUDUN', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.95 },
     ],
   },
   {
@@ -619,23 +598,23 @@ export const STAGE_CONFIGS: StageConfig[] = [
     paths: [PATH_S9_SPIRAL], slots: SLOTS_8, bossId: 'BOSS_XIAHOUYUAN',
     bossHint: '夏侯渊法抗高且远程狙墙，推荐黄忠+华佗护城。', bgTheme: '#384736', mapTheme: 'mountain',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_AIR_KITE', count: 14, interval: 0.7, pathIndex: 0, hpScale: 2.5 },
-      { waveIndex: 2, delay: 12, monsterId: 'M_RATTAN',   count: 12, interval: 0.9, pathIndex: 0, hpScale: 2.6 },
-      { waveIndex: 3, delay: 25, monsterId: 'M_CATAPULT', count: 7,  interval: 1.5, pathIndex: 0, hpScale: 2.7 },
-      { waveIndex: 4, delay: 38, monsterId: 'M_CAVALRY',  count: 16, interval: 0.6, pathIndex: 0, hpScale: 2.7 },
-      { waveIndex: 5, delay: 52, monsterId: 'BOSS_XIAHOUYUAN', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.55 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_AIR_KITE', count: 12, interval: 0.75, pathIndex: 0, hpScale: 0.65 },
+      { waveIndex: 2, delay: 12, monsterId: 'M_RATTAN',   count: 10, interval: 0.95, pathIndex: 0, hpScale: 0.7 },
+      { waveIndex: 3, delay: 25, monsterId: 'M_CATAPULT', count: 5,  interval: 1.5, pathIndex: 0, hpScale: 0.72 },
+      { waveIndex: 4, delay: 38, monsterId: 'M_CAVALRY',  count: 14, interval: 0.65, pathIndex: 0, hpScale: 0.72 },
+      { waveIndex: 5, delay: 52, monsterId: 'BOSS_XIAHOUYUAN', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.42 },
     ],
   },
   {
-    stageId: 10, name: '五丈原', desc: '八阵对称双路迷宫，司马懿封锁点将台。', costStamina: 5,
-    paths: [PATH_S10_BAGUA_L, PATH_S10_BAGUA_R], slots: SLOTS_8, bossId: 'BOSS_SIMAYI',
+    stageId: 10, name: '五丈原', desc: '八卦盘旋迷宫长道，司马懿封锁点将台。', costStamina: 5,
+    paths: [PATH_S10_BAGUA], slots: SLOTS_8, bossId: 'BOSS_SIMAYI',
     bossHint: '司马懿周期禁锢武将并回血，需自由拖拽换位+贾诩禁疗！', bgTheme: '#2C2047', mapTheme: 'bagua',
     waves: [
-      { waveIndex: 1, delay: 0,  monsterId: 'M_SHIELD',   count: 12, interval: 0.8, pathIndex: 0, hpScale: 3.4 },
-      { waveIndex: 2, delay: 13, monsterId: 'M_RATTAN',   count: 12, interval: 0.8, pathIndex: 1, hpScale: 3.4 },
-      { waveIndex: 3, delay: 26, monsterId: 'M_AIR_KITE', count: 16, interval: 0.6, pathIndex: 0, hpScale: 3.6 },
-      { waveIndex: 4, delay: 39, monsterId: 'M_SHAMAN',   count: 8,  interval: 1.0, pathIndex: 1, hpScale: 3.6 },
-      { waveIndex: 5, delay: 53, monsterId: 'BOSS_SIMAYI', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 1.85 },
+      { waveIndex: 1, delay: 0,  monsterId: 'M_SHIELD',   count: 10, interval: 0.85, pathIndex: 0, hpScale: 1.6 },
+      { waveIndex: 2, delay: 13, monsterId: 'M_RATTAN',   count: 10, interval: 0.85, pathIndex: 0, hpScale: 1.6 },
+      { waveIndex: 3, delay: 26, monsterId: 'M_AIR_KITE', count: 14, interval: 0.65, pathIndex: 0, hpScale: 1.7 },
+      { waveIndex: 4, delay: 39, monsterId: 'M_SHAMAN',   count: 7,  interval: 1.05, pathIndex: 0, hpScale: 1.7 },
+      { waveIndex: 5, delay: 53, monsterId: 'BOSS_SIMAYI', count: 1, interval: 1.0, pathIndex: 0, isBoss: true, hpScale: 0.95 },
     ],
   },
 ];
@@ -657,22 +636,22 @@ function offsetPath(pts: { x: number; y: number }[], dx: number, dy: number): { 
 
 const BASE_PATH_SETS = [
   [PATH_S1_U],
-  [PATH_S2_L, PATH_S2_R],
+  [PATH_S2_SNAKE],
   [PATH_S3_ZIGZAG],
-  [PATH_S4_L, PATH_S4_R, PATH_S4_C],
-  [PATH_S5_L, PATH_S5_R],
+  [PATH_S4_LOOP],
+  [PATH_S5_GRANARY],
   [PATH_S6_HAIRPIN],
-  [PATH_S7_BRIDGE_L, PATH_S7_BRIDGE_R],
+  [PATH_S7_BRIDGE],
   [PATH_S8_GOURD],
   [PATH_S9_SPIRAL],
-  [PATH_S10_BAGUA_L, PATH_S10_BAGUA_R],
+  [PATH_S10_BAGUA],
 ];
 
 const EXTRA_STAGE_META: { name: string; desc: string; bossId: string; hint: string; bgTheme: string; mapTheme: string }[] = [
   // 第 2 章 (11-20)：荆襄风云
-  { name: '新野伏兵', desc: '双路奇袭，火攻烧新野大破敌军。', bossId: 'BOSS_HUAXIONG', hint: '近战破大盾，注意双路分流。', bgTheme: '#496E4B', mapTheme: 'peach' },
+  { name: '新野伏兵', desc: '单道奇袭，火攻烧新野大破敌军。', bossId: 'BOSS_HUAXIONG', hint: '近战破大盾，卡紧弯道火力集中点。', bgTheme: '#496E4B', mapTheme: 'peach' },
   { name: '当阳长坂', desc: '乱军冲阵，铁骑奔袭长坂桥。', bossId: 'BOSS_WENCHOU', hint: '优先部署郭嘉/张飞减速截杀铁骑。', bgTheme: '#4A3B2B', mapTheme: 'forest' },
-  { name: '江夏水寨', desc: '木鸢空袭与水上栈桥夹击。', bossId: 'BOSS_CAIMAO', hint: '确保至少2名可对空输出武将。', bgTheme: '#1F445C', mapTheme: 'river' },
+  { name: '江夏水寨', desc: '木鸢空袭与水上栈桥强攻。', bossId: 'BOSS_CAIMAO', hint: '确保至少2名可对空输出武将。', bgTheme: '#1F445C', mapTheme: 'river' },
   { name: '华容狭道', desc: '曲折山道重兵云集，需强化突破。', bossId: 'BOSS_CAOREN', hint: '曹仁物抗极高，优先周瑜/法系。', bgTheme: '#523443', mapTheme: 'cliff' },
   { name: '南郡攻防', desc: '第二章守门小关，攻防节奏全面提速。', bossId: 'BOSS_LUBU', hint: '卡点关：建议提升装备强化与宝石后再战！', bgTheme: '#5C2E2E', mapTheme: 'fortress' },
   { name: '公安渡口', desc: '藤甲重盾配合巫祝稳步压境。', bossId: 'BOSS_ZHANGJIAO', hint: '火攻克藤甲，近战/贾诩压制回血。', bgTheme: '#1F445C', mapTheme: 'river' },
@@ -684,13 +663,13 @@ const EXTRA_STAGE_META: { name: string; desc: string; bossId: string; hint: stri
   // 第 3 章 (21-30)：汉中争霸
   { name: '阳平天险', desc: '山道崎岖，重盾与自爆兵交替冲锋。', bossId: 'BOSS_HUAXIONG', hint: '防止自爆兵近墙。', bgTheme: '#384736', mapTheme: 'mountain' },
   { name: '瓦口隘道', desc: '铁骑高速突防，考验减速与控制链。', bossId: 'BOSS_WENCHOU', hint: '郭嘉+张飞双控效果拔群。', bgTheme: '#523443', mapTheme: 'cliff' },
-  { name: '米仓夜袭', desc: '粮道遭袭，木鸢与巫祝双线并进。', bossId: 'BOSS_ZHANGJIAO', hint: '注意防空和禁疗。', bgTheme: '#2C4257', mapTheme: 'camp' },
-  { name: '汉水营盘', desc: '八阵双路拉锯，投石车列阵压城。', bossId: 'BOSS_XIAHOUYUAN', hint: '需尽快清理后排狙击单位。', bgTheme: '#46415E', mapTheme: 'desert' },
+  { name: '米仓夜袭', desc: '粮道遭袭，木鸢与巫祝联袂并进。', bossId: 'BOSS_ZHANGJIAO', hint: '注意防空和禁疗。', bgTheme: '#2C4257', mapTheme: 'camp' },
+  { name: '汉水营盘', desc: '八阵长道拉锯，投石车列阵压城。', bossId: 'BOSS_XIAHOUYUAN', hint: '需尽快清理后排狙击单位。', bgTheme: '#46415E', mapTheme: 'desert' },
   { name: '天荡山坡', desc: '第三章中段守门关，敌军坦度跃升。', bossId: 'BOSS_XIAHOUDUN', hint: '卡点关：需合成高品宝石并升级天赋！', bgTheme: '#384736', mapTheme: 'mountain' },
   { name: '定军绝壁', desc: '盘山陡道重现，夏侯渊远程狙城。', bossId: 'BOSS_XIAHOUYUAN', hint: '华佗护城配合黄忠远狙。', bgTheme: '#384736', mapTheme: 'mountain' },
   { name: '斜谷栈道', desc: '藤甲重兵结阵强攻，火攻奇效。', bossId: 'BOSS_CAOREN', hint: '周瑜+黄月英群体爆发破阵。', bgTheme: '#4A3B2B', mapTheme: 'forest' },
   { name: '陈仓坚城', desc: '铁壁重盾与自爆火兵连番冲击。', bossId: 'BOSS_LUBU', hint: '吕布狂暴前压，提前留好控场词条。', bgTheme: '#5C2E2E', mapTheme: 'fortress' },
-  { name: '祁山前哨', desc: '三路敌军齐压，全军输出压力倍增。', bossId: 'BOSS_CAIMAO', hint: '高频AOE+对空防线缺一不可。', bgTheme: '#4A3939', mapTheme: 'valley' },
+  { name: '祁山前哨', desc: '精锐大军长驱齐压，全军输出压力倍增。', bossId: 'BOSS_CAIMAO', hint: '高频AOE+对空防线缺一不可。', bgTheme: '#4A3939', mapTheme: 'valley' },
   { name: '街亭险道', desc: '第三章决战关，敌军精锐尽出。', bossId: 'BOSS_SIMAYI', hint: '强卡点：建议装备升阶+城防科技跟上！', bgTheme: '#2C2047', mapTheme: 'bagua' },
 
   // 第 4 章 (31-40)：夷陵烽火
@@ -702,11 +681,11 @@ const EXTRA_STAGE_META: { name: string; desc: string; bossId: string; hint: stri
   { name: '南中瘴林', desc: '藤甲兵团集群出没，物抗极高。', bossId: 'BOSS_CAOREN', hint: '周瑜+贾诩双法系持续消耗。', bgTheme: '#4A3B2B', mapTheme: 'forest' },
   { name: '泸水渡口', desc: '木鸢空袭不断，防空压力极大。', bossId: 'BOSS_CAIMAO', hint: '多选对空增伤与闪电链弹射。', bgTheme: '#1F445C', mapTheme: 'river' },
   { name: '盘蛇幽谷', desc: '葫芦谷伏击，投石车齐射城墙。', bossId: 'BOSS_XIAHOUDUN', hint: '前排拦截+超远程精准点杀。', bgTheme: '#4A3939', mapTheme: 'valley' },
-  { name: '铁索江关', desc: '三岔回环，吕布携重甲军团逼近。', bossId: 'BOSS_LUBU', hint: '注意主公神兵与高阶宝石暴击率。', bgTheme: '#5C2E2E', mapTheme: 'fortress' },
+  { name: '铁索江关', desc: '长道回环，吕布携重甲军团逼近。', bossId: 'BOSS_LUBU', hint: '注意主公神兵与高阶宝石暴击率。', bgTheme: '#5C2E2E', mapTheme: 'fortress' },
   { name: '建业外城', desc: '第四章终局Boss关，全面考验养成深度。', bossId: 'BOSS_SIMAYI', hint: '强卡点：需高阶装备+5品以上宝石+神兵！', bgTheme: '#2C2047', mapTheme: 'bagua' },
 
   // 第 5 章 (41-50)：天下一统
-  { name: '合肥新城', desc: '重兵围城，双路高压持久战。', bossId: 'BOSS_XIAHOUDUN', hint: '均衡阵容，前中后排协同输出。', bgTheme: '#5C2E2E', mapTheme: 'fortress' },
+  { name: '合肥新城', desc: '重兵围城，高压持久战一触即发。', bossId: 'BOSS_XIAHOUDUN', hint: '均衡阵容，前中后排协同输出。', bgTheme: '#5C2E2E', mapTheme: 'fortress' },
   { name: '濡须水坞', desc: '水陆空立体攻势，木鸢铺天盖地。', bossId: 'BOSS_CAIMAO', hint: '确保对空与AOE充足。', bgTheme: '#1F445C', mapTheme: 'river' },
   { name: '寿春平叛', desc: '大盾与铁骑交替冲击城门。', bossId: 'BOSS_HUAXIONG', hint: '关羽破甲+赵云穿透+郭嘉控场。', bgTheme: '#46415E', mapTheme: 'desert' },
   { name: '剑阁天险', desc: '一夫当关，重装投石车远距摧城。', bossId: 'BOSS_XIAHOUYUAN', hint: '华佗回血与城防免伤宝石关键。', bgTheme: '#384736', mapTheme: 'mountain' },
@@ -738,15 +717,17 @@ for (let i = 0; i < EXTRA_STAGE_META.length; i++) {
     return mode >= 2 || dx !== 0 || dy !== 0 ? offsetPath(mirrored, dx, dy) : mirrored;
   });
 
-  // 商业化分段指数难度：11~35关爬坡（拦住0氪直推于15~18、肝帝于35~40），36~50关中氪毕业检验
-  const earlyPow = Math.pow(1.105, Math.min(stageId, 35) - 11);
-  const latePow = stageId > 35 ? Math.pow(1.078, stageId - 35) : 1;
-  const baseScale = 15.5 * earlyPow * latePow;
+  // 商业化三段指数难度：11~25关（拦住0氪直推于12~18），26~38关硬卡点爬坡（拦住0氪肝帝于30~40），39~50关平稳收尾供中氪毕业
+  const p1 = Math.pow(1.09, Math.min(stageId, 25) - 11);
+  const p2 = stageId > 25 ? Math.pow(1.215, Math.min(stageId, 38) - 25) : 1;
+  const p3 = stageId > 38 ? Math.pow(1.02, stageId - 38) : 1;
+  const baseScale = 12.0 * p1 * p2 * p3;
   const checkpointMult = stageId % 10 === 0 ? 1.45 : stageId % 5 === 0 ? 1.32 : 1.0;
   const mobHpScale = Number((baseScale * checkpointMult).toFixed(2));
-  const bossEarlyPow = Math.pow(1.10, Math.min(stageId, 35) - 11);
-  const bossLatePow = stageId > 35 ? Math.pow(1.075, stageId - 35) : 1;
-  const bossScale = Number((5.4 * bossEarlyPow * bossLatePow * checkpointMult).toFixed(2));
+  const bp1 = Math.pow(1.085, Math.min(stageId, 25) - 11);
+  const bp2 = stageId > 25 ? Math.pow(1.205, Math.min(stageId, 38) - 25) : 1;
+  const bp3 = stageId > 38 ? Math.pow(1.02, stageId - 38) : 1;
+  const bossScale = Number((4.1 * bp1 * bp2 * bp3 * checkpointMult).toFixed(2));
 
   const pool = EXTRA_POOLS[Math.min(EXTRA_POOLS.length - 1, Math.floor((stageId - 11) / 8))];
   const waveCount = stageId >= 31 ? 6 : 5; // 不含 Boss 波，共 6~7 波

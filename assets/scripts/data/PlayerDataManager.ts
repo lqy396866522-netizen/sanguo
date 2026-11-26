@@ -175,8 +175,8 @@ export class PlayerDataManager {
       talismans[tc.id] = { id: tc.id, unlocked: false, level: 0 };
     }
 
-    // 初始赠送若干颗宝石，并将前3颗默认镶嵌在方案1上（全体武将增伤+开局三选一+城防免伤）
-    const gStart = this.makeGem(1, 3, 'start_rogue_choice');
+    // 初始赠送若干颗宝石，并将前3颗默认镶嵌在方案1上（暴击率+全体武将增伤+城防免伤）
+    const gStart = this.makeGem(1, 2, 'crit_rate');
     gStart.schemeMask = 1;
     gStart.holeIndex = 0;
     const gHeroDmg = this.makeGem(2, 2, 'hero_dmg_pct');
@@ -302,7 +302,7 @@ export class PlayerDataManager {
   }
 
   public getLordBattleBonus(): LordBattleBonus {
-    let atk = 68 + (this.profile.level - 1) * 8;
+    let atk = 48 + (this.profile.level - 1) * 7;
     let wallHp = 3200 + (this.profile.level - 1) * 160;
     let critRate = 0.08;
     let critDmg = this.getGlobalCritDmgBonus();
@@ -313,7 +313,7 @@ export class PlayerDataManager {
       const hasEquip = slot.equipTier > 0 && slot.equipQuality > 0;
       const factor = hasEquip
         ? 1 + (slot.slotLevel - 1) * 0.22 + (slot.equipTier - 1) * 0.45 + (slot.equipQuality - 1) * 0.15
-        : 0.35 + (slot.slotLevel - 1) * 0.15;
+        : 0.15 + (slot.slotLevel - 1) * 0.12;
       if (s === 1 || s === 2 || s === 6) atk += Math.round(18 * factor);
       else wallHp += Math.round(280 * factor);
 

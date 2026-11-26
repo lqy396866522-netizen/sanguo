@@ -58,7 +58,12 @@ export interface MonsterConfig {
   isRangedSiege?: boolean;
   siegeStopY?: number;
   healerInterval?: number;
+  healPctPerSec?: number;  // 军医每秒回血比例（如 0.03）
+  healRadius?: number;     // 军医回血半径（如 150）
   explodeOnDeath?: boolean;
+  roleType?: 'normal' | 'shield' | 'cavalry' | 'medic' | 'elite' | 'boss';
+  wallLeakPct?: number;    // 漏怪扣除城墙最大血量比例
+  dropChest?: boolean;     // 击杀掉落宝箱（额外三选一）
   resistMelee: number;     // -1 ~ 0.9
   resistRanged: number;
   resistMagic: number;
@@ -83,6 +88,7 @@ export interface SlotPos {
   x: number;
   y: number;
   tag: 'front' | 'mid' | 'back';
+  slotType?: 'normal' | 'corner' | 'highland' | 'front' | 'support';
 }
 
 export interface WaveConfig {
@@ -244,11 +250,13 @@ export interface RogueCard {
   lordSkillId?: string;
   tags: string[]; // ['新', '可对空', '近战', '无双']
   isSuperWeapon?: boolean;
+  rarity?: 'white' | 'blue' | 'purple' | 'gold';
 }
 
 export interface DamageResult {
   damage: number;
   isCrit: boolean;
+  isSuperCrit?: boolean;
   tag: 'normal' | 'immune_air' | 'resist' | 'weak' | 'crit';
 }
 
@@ -285,6 +293,9 @@ export interface FloatTextEvent {
   text: string;
   color: string;
   scale: number;
+  targetUid?: number;
+  amount?: number;
+  kind?: 'normal' | 'crit' | 'superCrit' | 'heal' | 'warn';
 }
 
 export interface BattleReward {

@@ -1,5 +1,6 @@
 import type { RogueCard, HeroSaveData } from './types.ts';
 import { HERO_CONFIGS, LORD_SKILLS } from './configs.ts';
+import { RUN_CONFIG } from './RunConfig.ts';
 
 export interface RogueDrawContext {
   battleLevel: number;
@@ -51,6 +52,7 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
           desc: `【${hero.skillName}】${hero.skillDesc}`,
           heroId: hero.id,
           tags,
+          rarity: hero.id === 'H08' || hero.id === 'H04' || hero.id === 'H12' ? 'gold' : 'purple',
         },
       });
     }
@@ -98,6 +100,7 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
         desc: ls.desc,
         lordSkillId: ls.id,
         tags: [ls.tag, '主公'],
+        rarity: curLv >= 3 ? 'purple' : curLv >= 1 ? 'blue' : 'white',
       },
     });
   }
@@ -138,6 +141,7 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
           affixId: af.id,
           tags,
           isSuperWeapon: af.isSuperWeapon,
+          rarity: af.isSuperWeapon ? 'gold' : curStack >= 1 ? 'purple' : 'blue',
         },
       });
     }
@@ -148,14 +152,25 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
     return drawThreeRogueCards({ ...ctx, excludeCardUids: [] });
   }
 
-  // 前3级保底至少1张新武将卡（如果池里有）
+  // 选项保底规则（§2.3）：Lv2 必含2名新武将(+1技能升级)、Lv3 至少1名、Lv4 必含2名、Lv5 至少1名
   const result: RogueCard[] = [];
   const tempPool = [...pool];
 
-  if (ctx.battleLevel <= 3 && ctx.deployedHeroIds.length < 2) {
+  const guaranteedHeroes = RUN_CONFIG.guaranteedHeroLevels[ctx.battleLevel] || 0;
+  for (let g = 0; g < guaranteedHeroes; g++) {
     const heroChoices = tempPool.filter((e) => e.card.type === 'NEW_HERO');
-    if (heroChoices.length > 0) {
-      const picked = pickWeighted(heroChoices, rand);
+    if (heroChoices.length === 0) break;
+    const picked = pickWeighted(heroChoices, rand);
+    result.push(picked.card);
+    const idx = tempPool.indexOf(picked);
+    if (idx >= 0) tempPool.splice(idx, 1);
+  }
+
+  // Lv2 剩余 1 槽优先给 1 个技能升级卡（如果池里有）
+  if (ctx.battleLevel === 2 && result.length < 3) {
+    const skillChoices = tempPool.filter((e) => e.card.type !== 'NEW_HERO');
+    if (skillChoices.length > 0) {
+      const picked = pickWeighted(skillChoices, rand);
       result.push(picked.card);
       const idx = tempPool.indexOf(picked);
       if (idx >= 0) tempPool.splice(idx, 1);

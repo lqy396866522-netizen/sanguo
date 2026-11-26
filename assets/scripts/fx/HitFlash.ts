@@ -12,8 +12,8 @@ const { ccclass, property, menu } = _decorator;
 @menu('FX/HitFlash')
 export class HitFlash extends Component {
     @property({ type: Material, tooltip: '基于 hit-flash.effect 的材质；Sprite 白闪用' }) flashMaterial: Material | null = null;
-    @property flashTime = 0.1;
-    @property({ tooltip: '挤压强度，0 关闭' }) squash = 0.12;
+    @property flashTime = 0.07;
+    @property({ tooltip: '挤压强度，0 关闭' }) squash = 0.08;
 
     private _sprite: Sprite | null = null;
     private _skel: sp.Skeleton | null = null;
@@ -36,7 +36,7 @@ export class HitFlash extends Component {
         const my = ++this._token;
         if (this._sprite && this.flashMaterial) {
             this._sprite.customMaterial = this.flashMaterial;
-            this._sprite.getMaterialInstance(0)?.setProperty('flashColor', new Color(255, 255, 255, 255));
+            this._sprite.getMaterialInstance(0)?.setProperty('flashColor', new Color(255, 230, 200, 95));
         } else if (this._skel) {
             this._skel.color = new Color(255, 90, 90, 255);
         }
@@ -56,7 +56,7 @@ export class HitFlash extends Component {
         this._token++;
         if (this._sprite && this.flashMaterial) {
             this._sprite.customMaterial = this.flashMaterial;
-            this._sprite.getMaterialInstance(0)?.setProperty('flashColor', new Color(255, 255, 255, 255));
+            this._sprite.getMaterialInstance(0)?.setProperty('flashColor', new Color(255, 230, 200, 95));
         } else if (this._skel) {
             this._skel.color = new Color(255, 90, 90, 255);
         }

@@ -12,7 +12,6 @@ import type {
   Vec2Point,
 } from './types.ts';
 import {
-  expNeededForLevel,
   getHeroConfig,
   getStageConfig,
   HERO_CONFIGS,
@@ -23,6 +22,10 @@ import { drawThreeRogueCards } from './RogueSystem.ts';
 import { createSeededRng, randomSeed, type RngFn } from './SeededRng.ts';
 import { SpatialGrid } from './SpatialGrid.ts';
 import { CHALLENGE_RULES, ELITE_AFFIXES, getWeaponConfig, type EliteAffixId } from './phase2Configs.ts';
+import { EventBus } from './EventBus.ts';
+import { ComboSystem } from './ComboSystem.ts';
+import { WaveDirector } from './WaveDirector.ts';
+import { getExpToNextLevel, getTargetTimeForLevel, RUN_CONFIG, type EnemyRoleType } from './RunConfig.ts';
 
 export const FIXED_DT = 1 / 30;
 export const WALL_Y = 265;
@@ -73,6 +76,7 @@ export type BattleOp =
   | { t: number; k: 'autoPlace' }
   | { t: number; k: 'move'; h: string; x: number; y: number }
   | { t: number; k: 'auto'; v: boolean }
+  | { t: number; k: 'crisis'; i: 0 | 1 | 2 }
   | { t: number; k: 'revive' }
   | { t: number; k: 'defeat' };
 
@@ -128,6 +132,7 @@ export interface DeployedHero {
   x: number;
   y: number;
   cooldown: number;
+  maxCooldown: number;
   attackCount: number;
   specialTimer: number;
   attackAnimTimer: number;
@@ -184,7 +189,16 @@ export interface BulletProj {
   life: number;
 }
 
-export type BattlePhase = 'PLAYING' | 'ROGUE_CHOICE' | 'DEPLOY_PICK' | 'PAUSED' | 'REVIVE_ASK' | 'VICTORY' | 'DEFEAT';
+export interface AllyGuardUnit {
+  id: number;
+  x: number;
+  y: number;
+  remainSec: number;
+  attackCooldown: number;
+  damage: number;
+}
+
+export type BattlePhase = 'PLAYING' | 'ROGUE_CHOICE' | 'CRISIS_CHOICE' | 'DEPLOY_PICK' | 'PAUSED' | 'REVIVE_ASK' | 'VICTORY' | 'DEFEAT';
 
 export class BattleWorld {
   public stage: StageConfig;
@@ -227,6 +241,11 @@ export class BattleWorld {
   public bullets: BulletProj[] = [];
   public zones: GroundZone[] = [];
   public oxen: WoodenOxUnit[] = [];
+  public allyGuards: AllyGuardUnit[] = [];
+
+  public readonly events = new EventBus();
+  public readonly combo: ComboSystem;
+  public readonly waveDirector: WaveDirector;
 
   public vfxEvents: BattleVfxEvent[] = [];
   public floatTexts: FloatTextEvent[] = [];
@@ -235,6 +254,15 @@ export class BattleWorld {
   public kills = 0;
   public bossSpawned = false;
   public bossKilled = false;
+
+  // 绝境三选一 & 精英宝箱 & 校准采样
+  public crisisTriggered = false;
+  public pendingChestChoices = 0;
+  public currentChoiceIsChest = false;
+  public levelUpTimes: { level: number; elapsed: number; target: number | null }[] = [];
+  public wallHpSamples: { t: number; ratio: number }[] = [];
+  private nextWallSampleAt = 0;
+  private lastKillWasCrit = false;
 
   // 回放校验：种子 + 逻辑帧计数 + 操作日志
   public readonly seed: number;
@@ -282,7 +310,11 @@ export class BattleWorld {
     this.wallHp = this.maxWallHp;
     this.wallImmuneHits = Math.round(lordBonus.gemEffects.wall_immune_hits || 0);
     this.wallDamageReduce = Math.min(0.4, (lordBonus.wallReducePct || 0) / 100);
-    this.expNeeded = expNeededForLevel(1);
+    this.expNeeded = getExpToNextLevel(1);
+
+    this.combo = new ComboSystem(this.events);
+    const stageHpScale = this.stage.waves[0]?.hpScale || 1;
+    this.waveDirector = new WaveDirector(this.stage.bossId, stageHpScale, this.events);
 
     this.generateRandomSuggestedSlots();
 
@@ -294,8 +326,9 @@ export class BattleWorld {
       });
     }
 
-    // 每局天生赠送1次免费开局点将，若镶嵌玉佩开局宝石或装备3级兵符再额外叠加
-    const startChoices = 1 + Math.round(lordBonus.gemEffects.start_rogue_choice || 0) + (lordBonus.talismanEffects?.startRogueExtra || 0);
+    // 开局固定仅进行 1 次点将（选 1 位首发英雄）
+    // const startChoices = 1 + Math.round(lordBonus.gemEffects.start_rogue_choice || 0) + (lordBonus.talismanEffects?.startRogueExtra || 0);
+    const startChoices = 1;
     this.pendingLevelUps += startChoices;
     this.openingChoicesLeft = startChoices;
     this.triggerNextRogueChoice();
@@ -332,53 +365,94 @@ export class BattleWorld {
     this.asOp({ k: 'auto', v }, () => {
       this.autoMode = v;
       if (v && this.phase === 'ROGUE_CHOICE') this.selectRogueCard(0);
+      else if (v && this.phase === 'CRISIS_CHOICE') this.selectCrisisOption(2);
       else if (v && this.phase === 'DEPLOY_PICK') this.autoPlacePendingHero();
     });
   }
 
-  // 每局基于当前关卡曲折路径动态随机生成 7~8 个黄金推荐坑位（仍支持全图任意空地随意放置）
+  // 基于当前关卡道路走向均匀生成 8 个黄金坑位（覆盖上/中/下关键拐角，避开左右HUD栏）
   private generateRandomSuggestedSlots(): void {
-    const candidates: { x: number; y: number; dist: number }[] = [];
-    for (let x = 95; x <= 655; x += 56) {
-      for (let y = 360; y <= 1050; y += 64) {
-        const jx = Math.max(75, Math.min(675, Math.round(x + (this.rng() - 0.5) * 26)));
-        const jy = Math.max(345, Math.min(1065, Math.round(y + (this.rng() - 0.5) * 26)));
-        const d = this.minDistToPaths(jx, jy);
-        if (d >= 50 && d <= 125) {
-          candidates.push({ x: jx, y: jy, dist: d });
+    const candidates: { x: number; y: number; dist: number; score: number }[] = [];
+    for (let x = 155; x <= 585; x += 48) {
+      for (let y = 415; y <= 985; y += 54) {
+        const d = this.minDistToPaths(x, y);
+        if (d >= 58 && d <= 98) {
+          // 优先贴近道路拐角附近（能覆盖多段路径）且远离边缘
+          const edgePenalty = Math.abs(x - 370) * 0.04;
+          const idealDist = Math.abs(d - 74);
+          candidates.push({ x, y, dist: d, score: idealDist + edgePenalty + this.rng() * 14 });
         }
       }
     }
 
-    // 随机洗牌
-    for (let i = candidates.length - 1; i > 0; i--) {
-      const j = Math.floor(this.rng() * (i + 1));
-      const tmp = candidates[i];
-      candidates[i] = candidates[j];
-      candidates[j] = tmp;
-    }
+    candidates.sort((a, b) => a.score - b.score);
 
     const picked: SlotPos[] = [];
-    const targetCount = 8;
-    for (const c of candidates) {
-      if (picked.length >= targetCount) break;
-      if (picked.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= 105)) {
-        const tag: SlotPos['tag'] = c.y >= 800 ? 'front' : c.y <= 530 ? 'back' : 'mid';
-        picked.push({ id: picked.length + 1, x: c.x, y: c.y, tag });
+    // 分上/中/下三带各先选 2~3 个，确保全战场分布均衡而非扎堆角落
+    const bands: [number, number, number][] = [
+      [780, 990, 3],
+      [580, 779, 3],
+      [410, 579, 2],
+    ];
+    for (const [minY, maxY, quota] of bands) {
+      let added = 0;
+      for (const c of candidates) {
+        if (added >= quota) break;
+        if (c.y < minY || c.y > maxY) continue;
+        if (picked.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= 118)) {
+          const tag: SlotPos['tag'] = c.y >= 780 ? 'front' : c.y <= 579 ? 'back' : 'mid';
+          picked.push({ id: picked.length + 1, x: c.x, y: c.y, tag, slotType: 'normal' });
+          added++;
+        }
       }
     }
 
-    // 若因路径密集导致不足6个，从配置兜底补齐合法点
+    // 不足 8 个则全局补齐
+    for (const c of candidates) {
+      if (picked.length >= 8) break;
+      if (picked.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= 105)) {
+        const tag: SlotPos['tag'] = c.y >= 780 ? 'front' : c.y <= 579 ? 'back' : 'mid';
+        picked.push({ id: picked.length + 1, x: c.x, y: c.y, tag, slotType: 'normal' });
+      }
+    }
+
     if (picked.length < 6) {
       for (const fallback of this.stage.slots) {
         if (picked.length >= 6) break;
-        if (this.minDistToPaths(fallback.x, fallback.y) >= 46 && picked.every((p) => Math.hypot(p.x - fallback.x, p.y - fallback.y) >= 85)) {
-          picked.push({ id: picked.length + 1, x: fallback.x, y: fallback.y, tag: fallback.tag });
+        if (this.minDistToPaths(fallback.x, fallback.y) >= 48 && picked.every((p) => Math.hypot(p.x - fallback.x, p.y - fallback.y) >= 85)) {
+          picked.push({ id: picked.length + 1, x: fallback.x, y: fallback.y, tag: fallback.tag, slotType: 'normal' });
         }
       }
     }
 
     this.suggestedSlots = picked;
+  }
+
+  /** 严格沿行军路径向起点方向击退怪物，物理杜绝离路抄近道 Bug */
+  private pushMonsterBackAlongPath(m: MonsterUnit, distPx: number): void {
+    if (distPx <= 0 || m.dead) return;
+    const path = this.stage.paths[m.pathIndex];
+    if (!path || path.length < 2) return;
+    let remain = distPx;
+    while (remain > 0 && m.waypointIndex >= 1) {
+      const prevWp = path[m.waypointIndex - 1];
+      const dx = prevWp.x - m.x;
+      const dy = prevWp.y - m.y;
+      const segDist = Math.hypot(dx, dy);
+      if (segDist <= remain) {
+        m.x = prevWp.x;
+        m.y = prevWp.y;
+        remain -= segDist;
+        if (m.waypointIndex > 1) m.waypointIndex--;
+        else break;
+      } else if (segDist > 0.001) {
+        m.x += (dx / segDist) * remain;
+        m.y += (dy / segDist) * remain;
+        remain = 0;
+      } else {
+        break;
+      }
+    }
   }
 
   public minDistToPaths(x: number, y: number): number {
@@ -408,32 +482,17 @@ export class BattleWorld {
     return { valid: true };
   }
 
-  // 只读：当前已开始刷怪的最大波次序号（UI 波次横幅用，不参与战斗逻辑）
+  // 只读：当前已开始刷怪的波次序号（读取 20 波 WaveDirector）
   public getCurrentWave(): { index: number; total: number; isBoss: boolean } {
-    let index = 0;
-    let isBoss = false;
-    let total = 0;
-    for (let i = 0; i < this.stage.waves.length; i++) {
-      const w = this.stage.waves[i];
-      total = Math.max(total, w.waveIndex);
-      if (this.waveSpawnState[i].spawned > 0 && w.waveIndex >= index) {
-        index = w.waveIndex;
-        isBoss = !!w.isBoss;
-      }
-    }
-    return { index, total, isBoss };
+    const idx = this.waveDirector.currentWaveIndex;
+    const total = this.waveDirector.waves.length;
+    const isBoss = idx >= total;
+    return { index: idx, total, isBoss };
   }
 
   public getWaveProgress(): number {
-    let total = 0;
-    let done = 0;
-    for (let i = 0; i < this.stage.waves.length; i++) {
-      total += this.stage.waves[i].count;
-      done += this.waveSpawnState[i].spawned;
-    }
-    if (total === 0) return 0;
-    const spawnRatio = done / total;
     if (this.bossKilled) return 1;
+    const spawnRatio = this.waveDirector.getProgress();
     return Math.min(0.99, spawnRatio * 0.9 + (this.bossSpawned && this.monsters.length === 0 ? 0.1 : 0));
   }
 
@@ -455,7 +514,14 @@ export class BattleWorld {
   }
 
   public step(dt: number): void {
-    if (this.phase === 'PAUSED' || this.phase === 'ROGUE_CHOICE' || this.phase === 'REVIVE_ASK' || this.phase === 'VICTORY' || this.phase === 'DEFEAT') {
+    if (
+      this.phase === 'PAUSED'
+      || this.phase === 'ROGUE_CHOICE'
+      || this.phase === 'CRISIS_CHOICE'
+      || this.phase === 'REVIVE_ASK'
+      || this.phase === 'VICTORY'
+      || this.phase === 'DEFEAT'
+    ) {
       return;
     }
     const scale = this.phase === 'DEPLOY_PICK' ? 0.05 : this.userSpeed;
@@ -474,6 +540,16 @@ export class BattleWorld {
     if (this.phase !== 'PLAYING' && this.phase !== 'DEPLOY_PICK') return;
     this.tickCount++;
     this.elapsed += dt;
+    this.combo.update(dt);
+
+    if (this.elapsed >= this.nextWallSampleAt) {
+      this.wallHpSamples.push({
+        t: Math.round(this.elapsed),
+        ratio: Math.round((this.wallHp / Math.max(1, this.maxWallHp)) * 1000) / 1000,
+      });
+      this.nextWallSampleAt += 5;
+    }
+
     for (const m of this.monsters) { m.prevX = m.x; m.prevY = m.y; }
     for (const b of this.bullets) { b.prevX = b.x; b.prevY = b.y; }
 
@@ -490,9 +566,10 @@ export class BattleWorld {
     this.updateWaves();
     this.rebuildGrid();
 
-    // 3. 主公自动攻击（仅防守防线中下半场）+ 城防箭塔
+    // 3. 主公自动攻击（仅防守防线中下半场）+ 城防箭塔 + 援军步兵
     this.updateLord(dt);
     this.updateTowers(dt);
+    this.updateAllyGuards(dt);
 
     // 4. 武将自动攻击
     this.updateHeroes(dt);
@@ -510,14 +587,47 @@ export class BattleWorld {
   }
 
   private updateWaves(): void {
-    for (let i = 0; i < this.stage.waves.length; i++) {
-      const wave = this.stage.waves[i];
-      const st = this.waveSpawnState[i];
-      while (st.spawned < wave.count && this.elapsed >= st.nextTime) {
-        this.spawnMonster(wave.monsterId, wave.pathIndex, wave.hpScale || 1);
-        if (wave.isBoss) this.bossSpawned = true;
-        st.spawned++;
-        st.nextTime += wave.interval;
+    this.waveDirector.update(this.elapsed, this.monsters.length, {
+      spawnMonster: (monsterId, _roleType, hpScale, isBoss) => {
+        this.spawnMonster(monsterId, 0, hpScale);
+        if (isBoss) this.bossSpawned = true;
+      },
+    });
+  }
+
+  private updateAllyGuards(dt: number): void {
+    for (let i = this.allyGuards.length - 1; i >= 0; i--) {
+      const g = this.allyGuards[i];
+      g.remainSec -= dt;
+      if (g.remainSec <= 0) {
+        this.allyGuards.splice(i, 1);
+        continue;
+      }
+      g.attackCooldown -= dt;
+      if (g.attackCooldown <= 0) {
+        const target = this.findNearestTarget(g.x, g.y, 155, false);
+        if (target) {
+          g.attackCooldown = 0.75;
+          target.slowTimer = Math.max(target.slowTimer, 0.8);
+          target.slowRatio = Math.max(target.slowRatio, 0.45);
+          this.applyHit('LORD', target, {
+            baseAtk: g.damage,
+            skillMultiplier: 1.0,
+            outLevelBonus: 0,
+            globalDmgPct: 0,
+            elementDmgPct: 0,
+            distanceDmgPct: 0,
+            bossDmgPct: 0,
+            armorPenetration: 0,
+            critRate: this.lordBonus.critRate,
+            critDmgBonus: this.lordBonus.globalCritDmgBonus,
+            dimDistance: 'melee',
+            dimElement: 'physical',
+            canHitAir: false,
+            rng: this.rng,
+          }, g.x, g.y);
+          this.vfxEvents.push({ type: 'slash_arc', x: g.x, y: g.y, tx: target.x, ty: target.y, radius: 68, color: '#69F0AE', duration: 0.16 });
+        }
       }
     }
   }
@@ -659,7 +769,7 @@ export class BattleWorld {
       if (hero.heroId === 'H01' && hero.affixStacks['H01_A3']) range *= 1 + 0.3 * hero.affixStacks['H01_A3'];
       if (hero.heroId === 'H02' && hero.affixStacks['H02_A2']) range *= 1 + 0.15 * hero.affixStacks['H02_A2'];
       if (hero.heroId === 'H03' && hero.affixStacks['H03_A2']) range *= 1 + 0.25 * hero.affixStacks['H03_A2'];
-      if (hero.heroId === 'H08' && hero.affixStacks['H08_A2']) range = 290;
+      if (hero.heroId === 'H08' && hero.affixStacks['H08_A2']) range = 260;
 
       hero.specialTimer += dt;
       if (hero.heroId === 'H08' && hero.affixStacks['H08_SW'] && hero.specialTimer >= 5.0) {
@@ -687,9 +797,11 @@ export class BattleWorld {
       const target = this.findNearestTarget(hero.x, hero.y, range, canHitAir);
       if (!target) continue;
 
-      hero.cooldown = cfg.attackInterval / spdMult;
+      const cd = cfg.attackInterval / spdMult;
+      hero.cooldown = cd;
+      hero.maxCooldown = cd;
       hero.attackCount++;
-      hero.attackAnimTimer = 0.2;
+      hero.attackAnimTimer = 0.32;
 
       const distBonus = cfg.dimDistance === 'melee'
         ? (this.lordBonus.gemEffects.melee_dmg_pct || 0) / 100
@@ -831,7 +943,7 @@ export class BattleWorld {
       if (af['H05_A3'] && hero.attackCount % 4 === 0) {
         this.vfxEvents.push({ type: 'wind_push', x: 375, y: 650, radius: 340, color: '#69F0AE', duration: 0.35 });
         for (const m of this.monsters) {
-          if (!m.dead && !m.config.isBoss) m.y = Math.min(1140, m.y + 75);
+          if (!m.dead && !m.config.isBoss) this.pushMonsterBackAlongPath(m, 75);
         }
       }
       if (af['H05_SW'] && hero.attackCount % 5 === 0) {
@@ -986,7 +1098,7 @@ export class BattleWorld {
           this.applyHit(b.sourceId, m, atk, b.x - b.vx * 0.02, b.y - b.vy * 0.02);
 
           if (b.knockbackPx > 0 && !m.config.isBoss) {
-            m.y = Math.min(1140, m.y + b.knockbackPx);
+            this.pushMonsterBackAlongPath(m, b.knockbackPx);
           }
           if (b.thunderStun && this.rng() < (b.thunderChance ?? 0.3)) {
             m.stunTimer = Math.max(m.stunTimer, 0.5);
@@ -1112,6 +1224,27 @@ export class BattleWorld {
         }
       }
 
+      // 军医：周围 150px 敌人每秒回 3% 血（每秒结算一次便于可视化与防刷屏）
+      if (m.config.healPctPerSec) {
+        m.healerTimer -= dt;
+        if (m.healerTimer <= 0) {
+          m.healerTimer = 1.0;
+          const radius = m.config.healRadius || 150;
+          const antiRatio = m.poisonAntiHeal ? 0.1 : 1.0;
+          let healedAny = false;
+          for (const ally of this.monsters) {
+            if (!ally.dead && ally.hp < ally.maxHp && Math.hypot(ally.x - m.x, ally.y - m.y) <= radius) {
+              const heal = Math.max(1, Math.round(ally.maxHp * m.config.healPctPerSec * antiRatio));
+              ally.hp = Math.min(ally.maxHp, ally.hp + heal);
+              healedAny = true;
+            }
+          }
+          if (healedAny && this.floatTexts.length < 40) {
+            this.floatTexts.push({ x: m.x, y: m.y + 24, text: '+回血', color: '#69F0AE', scale: 0.9, kind: 'heal' });
+          }
+        }
+      }
+
       if (m.elite === 'regen' && m.hp > 0) {
         m.hp = Math.min(m.maxHp, m.hp + m.maxHp * 0.015 * dt * (m.poisonAntiHeal ? 0.1 : 1));
       }
@@ -1136,19 +1269,16 @@ export class BattleWorld {
         m.attackCooldown -= dt;
         if (m.attackCooldown <= 0) {
           m.attackCooldown = 1.2;
-          const rawDmg = m.config.wallDmg * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1);
+          const role = m.config.roleType || (m.config.isBoss ? 'boss' : 'normal');
+          const leakPct = m.config.wallLeakPct ?? RUN_CONFIG.wallLeakPct[role];
+          const baseWallDmg = leakPct ? Math.round(this.maxWallHp * leakPct) : m.config.wallDmg;
+          const rawDmg = baseWallDmg * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1);
           this.damageWall(rawDmg);
           const thornsPct = ((this.lordBonus.gemEffects.wall_thorns || 0) + (this.lordBonus.talismanEffects?.wallThornsPct || 0)) / 100;
           if (thornsPct > 0 && !m.dead) {
             const refl = Math.max(10, Math.round(rawDmg * thornsPct * 3));
             m.hp -= refl;
-            this.floatTexts.push({ x: m.x, y: m.y + 20, text: `反震 ${refl}`, color: '#90CAF9', scale: 0.9 });
-            if (m.hp <= 0) {
-              m.dead = true;
-              this.kills++;
-              this.gainBattleExp(m.config.exp);
-              if (m.config.isBoss) this.bossKilled = true;
-            }
+            this.floatTexts.push({ x: m.x, y: m.y + 20, text: `反震 ${refl}`, color: '#90CAF9', scale: 0.9, kind: 'warn' });
           }
         }
         continue;
@@ -1217,13 +1347,25 @@ export class BattleWorld {
   private damageWall(raw: number): void {
     if (this.wallImmuneHits > 0) {
       this.wallImmuneHits--;
-      this.floatTexts.push({ x: LORD_POS.x, y: WALL_Y + 25, text: '免疫!', color: '#4FC3F7', scale: 1.0 });
+      this.floatTexts.push({ x: LORD_POS.x, y: WALL_Y + 25, text: '免疫!', color: '#4FC3F7', scale: 1.0, kind: 'warn' });
       return;
     }
-    const stageScale = this.stage.stageId > 10 ? 1 + (this.stage.stageId - 10) * 0.05 : 1;
-    const dmg = Math.max(1, Math.round(raw * stageScale * (1 - this.wallDamageReduce)));
+    const dmg = Math.max(1, Math.round(raw * (1 - this.wallDamageReduce)));
     this.wallHp = Math.max(0, this.wallHp - dmg);
-    this.shakeRequest = Math.max(this.shakeRequest, dmg >= 150 ? 7 : 3);
+    this.shakeRequest = Math.max(this.shakeRequest, dmg >= 150 ? 7 : 5);
+
+    // 血量首次跌破 30% 时触发「绝境三选一」（每局一次）
+    if (!this.crisisTriggered && this.wallHp > 0 && this.wallHp / this.maxWallHp < RUN_CONFIG.crisisThreshold) {
+      this.crisisTriggered = true;
+      this.events.emit('crisis_triggered', { wallHpRatio: this.wallHp / this.maxWallHp });
+      if (this.phase === 'PLAYING') {
+        this.phase = 'CRISIS_CHOICE';
+        this.timeScale = 0;
+        if (this.autoMode) {
+          this.internal(() => this.selectCrisisOption(2));
+        }
+      }
+    }
   }
 
   private sourcePos(sourceId: string): Vec2Point | null {
@@ -1234,7 +1376,8 @@ export class BattleWorld {
 
   // fx/fy：攻击来向（用于火花朝向与击退方向），缺省取攻击者站位
   private applyHit(sourceId: string, m: MonsterUnit, atk: AttackCalcParams, fx?: number, fy?: number) {
-    const res = calculateDamage(atk, {
+    const inferredAoeOrPierce = atk.isAoeOrPierce ?? (atk.dimDistance === 'magic' || atk.dimDistance === 'melee');
+    const res = calculateDamage({ ...atk, isAoeOrPierce: inferredAoeOrPierce }, {
       config: m.config,
       shredPhysical: m.shredPhysical,
       shredAll: m.shredAll - (m.elite === 'armored' ? 0.15 : 0),
@@ -1243,13 +1386,24 @@ export class BattleWorld {
     });
 
     if (res.tag === 'immune_air') {
-      this.floatTexts.push({ x: m.x, y: m.y + 22, text: '无法对空', color: '#B0BEC5', scale: 0.75 });
+      this.floatTexts.push({ x: m.x, y: m.y + 22, text: '无法对空', color: '#B0BEC5', scale: 0.75, kind: 'warn' });
       return res;
     }
 
     m.hp -= res.damage;
-    m.hitFlashTimer = 0.1;
+    if (m.hp <= 0) this.lastKillWasCrit = res.isCrit;
+    m.hitFlashTimer = 0.08;
     this.damageStats[sourceId] = (this.damageStats[sourceId] || 0) + res.damage;
+
+    this.events.emit('enemy_damaged', {
+      uid: m.uid,
+      x: m.x,
+      y: m.y,
+      damage: res.damage,
+      isCrit: res.isCrit,
+      isSuperCrit: !!res.isSuperCrit,
+      tag: res.tag,
+    });
 
     // 主公号令/神兵光环：全军武将命中概率触发落雷麻痹
     if (sourceId !== 'LORD' && sourceId !== 'TOWER') {
@@ -1283,9 +1437,8 @@ export class BattleWorld {
       const dy = m.y - sy;
       const len = Math.hypot(dx, dy) || 1;
       if (res.isCrit && !m.config.isBoss && m.config.space === 'ground') {
-        const push = atk.dimDistance === 'melee' ? 10 : 5;
-        m.x = Math.max(40, Math.min(710, m.x + (dx / len) * push));
-        m.y = Math.min(1140, m.y + Math.abs(dy / len) * push);
+        const push = atk.dimDistance === 'melee' ? 12 : 6;
+        this.pushMonsterBackAlongPath(m, push);
       }
       if (this.vfxEvents.length < 120) {
         const r = m.config.radius;
@@ -1301,14 +1454,16 @@ export class BattleWorld {
     let color = '#FFFFFF';
     let scale = 0.85;
     let text = `${res.damage}`;
-    if (res.tag === 'crit') { color = '#FFD54F'; scale = 1.25; text = `暴 ${res.damage}`; }
+    let kind: FloatTextEvent['kind'] = 'normal';
+    if (res.isSuperCrit) { color = '#FF5252'; scale = 1.45; text = `暴击 ${res.damage}!`; kind = 'superCrit'; }
+    else if (res.tag === 'crit') { color = '#FFD54F'; scale = 1.25; text = `暴击 ${res.damage}`; kind = 'crit'; }
     else if (res.tag === 'weak') { color = '#FF8A65'; scale = 1.05; text = `${res.damage}!`; }
     else if (res.tag === 'resist') { color = '#90A4AE'; scale = 0.75; text = `${res.damage}(抗)`; }
 
     // 先消耗随机数再判断上限：飘字队列长度受表现层消费影响，不能让它改变逻辑随机序列
     const jitter = (this.rng() - 0.5) * 18;
-    if (this.floatTexts.length < 40) {
-      this.floatTexts.push({ x: m.x + jitter, y: m.y + 18, text, color, scale });
+    if (this.floatTexts.length < 60) {
+      this.floatTexts.push({ x: m.x + jitter, y: m.y + 18, text, color, scale, targetUid: m.uid, amount: res.damage, kind });
     }
     return res;
   }
@@ -1319,11 +1474,35 @@ export class BattleWorld {
       if (m.hp <= 0 && !m.dead) {
         m.dead = true;
         this.kills++;
-        if (m.config.isBoss) this.bossKilled = true;
+        this.combo.onKill();
+        const roleType: EnemyRoleType = m.config.roleType || (m.config.isBoss ? 'boss' : 'normal');
+        const isElite = roleType === 'elite';
+        const isBoss = !!m.config.isBoss;
+        if (isBoss) this.bossKilled = true;
         if (m.config.explodeOnDeath && m.y <= WALL_Y + 95) {
           this.damageWall(m.config.wallDmg);
         }
-        this.gainBattleExp(m.config.exp);
+
+        const expGain = RUN_CONFIG.expByRole[roleType] ?? m.config.exp;
+        this.events.emit('enemy_killed', {
+          uid: m.uid,
+          monsterId: m.config.id,
+          roleType,
+          x: m.x,
+          y: m.y,
+          exp: expGain,
+          isCrit: this.lastKillWasCrit,
+          isElite,
+          isBoss,
+        });
+        this.lastKillWasCrit = false;
+
+        if (m.config.dropChest) {
+          this.pendingChestChoices++;
+          this.events.emit('elite_chest_dropped', { x: m.x, y: m.y });
+        }
+
+        this.gainBattleExp(expGain);
         this.monsters.splice(i, 1);
         if (m.elite === 'split') {
           for (let k = 0; k < 2; k++) {
@@ -1345,20 +1524,28 @@ export class BattleWorld {
       return;
     }
 
-    const allSpawned = this.waveSpawnState.every((s, idx) => s.spawned >= this.stage.waves[idx].count);
-    if (allSpawned && this.monsters.length === 0 && this.bossKilled) {
+    if (this.waveDirector.allWavesSpawned && this.monsters.length === 0 && this.bossKilled) {
       this.phase = 'VICTORY';
       this.timeScale = 0;
+      return;
+    }
+
+    if ((this.pendingLevelUps > 0 || this.pendingChestChoices > 0) && this.phase === 'PLAYING') {
+      this.triggerNextRogueChoice();
     }
   }
 
   private gainBattleExp(exp: number): void {
-    this.battleExp += Math.round(exp * (1 + (this.lordBonus.expGainPct || 0) / 100));
+    const gained = Math.max(1, Math.round(exp * (1 + (this.lordBonus.expGainPct || 0) / 100)));
+    this.battleExp += gained;
     while (this.battleExp >= this.expNeeded) {
       this.battleExp -= this.expNeeded;
       this.battleLevel++;
-      this.expNeeded = expNeededForLevel(this.battleLevel);
+      this.expNeeded = getExpToNextLevel(this.battleLevel);
       this.pendingLevelUps++;
+      const target = getTargetTimeForLevel(this.battleLevel);
+      this.levelUpTimes.push({ level: this.battleLevel, elapsed: Math.round(this.elapsed * 10) / 10, target });
+      this.events.emit('level_up', { level: this.battleLevel, elapsed: this.elapsed, targetTime: target });
     }
     if (this.pendingLevelUps > 0 && this.phase === 'PLAYING') {
       this.triggerNextRogueChoice();
@@ -1366,10 +1553,17 @@ export class BattleWorld {
   }
 
   public triggerNextRogueChoice(): void {
-    if (this.pendingLevelUps <= 0) return;
-    this.pendingLevelUps--;
-    this.currentChoiceIsOpening = this.openingChoicesLeft > 0;
-    if (this.openingChoicesLeft > 0) this.openingChoicesLeft--;
+    if (this.pendingLevelUps <= 0 && this.pendingChestChoices <= 0) return;
+    if (this.pendingLevelUps > 0) {
+      this.pendingLevelUps--;
+      this.currentChoiceIsChest = false;
+      this.currentChoiceIsOpening = this.openingChoicesLeft > 0;
+      if (this.openingChoicesLeft > 0) this.openingChoicesLeft--;
+    } else {
+      this.pendingChestChoices--;
+      this.currentChoiceIsChest = true;
+      this.currentChoiceIsOpening = false;
+    }
     const deployedIds = Array.from(this.deployedHeroes.keys());
     const affixStacks: Record<string, Record<string, number>> = {};
     for (const h of this.deployedHeroes.values()) {
@@ -1450,10 +1644,10 @@ export class BattleWorld {
     this.resumeOrNextChoice();
   }
 
-  // 全都要（激励视频）：三张卡全部生效，其中的新武将按顺序依次布阵
+  // 全都要（激励视频）：三张卡全部生效，其中的新武将按顺序依次布阵（开局单选阶段禁用）
   public takeAllRogueCards(): boolean {
     return this.asOp({ k: 'all' }, () => {
-      if (this.phase !== 'ROGUE_CHOICE' || this.takeAllLeft <= 0 || this.pendingRogueCards.length === 0) return false;
+      if (this.phase !== 'ROGUE_CHOICE' || this.currentChoiceIsOpening || this.takeAllLeft <= 0 || this.pendingRogueCards.length === 0) return false;
       this.takeAllLeft--;
       const cards = this.pendingRogueCards;
       this.pendingRogueCards = [];
@@ -1521,7 +1715,7 @@ export class BattleWorld {
     let snappedSlotId: number | undefined;
 
     for (const s of this.suggestedSlots) {
-      if (Math.hypot(s.x - x, s.y - y) <= 36) {
+      if (Math.hypot(s.x - x, s.y - y) <= 64) {
         const occupied = Array.from(this.deployedHeroes.values()).some((h) => Math.hypot(h.x - s.x, h.y - s.y) < 30);
         if (!occupied) {
           finalX = s.x;
@@ -1544,10 +1738,11 @@ export class BattleWorld {
       slotId: snappedSlotId,
       x: finalX,
       y: finalY,
-      cooldown: 0.15,
+      cooldown: 0.35,
+      maxCooldown: cfg.attackInterval,
       attackCount: 0,
       specialTimer: 0,
-      attackAnimTimer: 0.25,
+      attackAnimTimer: 0.32,
       affixStacks: {},
       killBonusPct: 0,
     });
@@ -1574,7 +1769,7 @@ export class BattleWorld {
       (s) => !Array.from(this.deployedHeroes.values()).some((h) => Math.hypot(h.x - s.x, h.y - s.y) < 35)
     );
     const preferTag: SlotPos['tag'] =
-      cfg.range <= 240 ? 'front' : cfg.range >= 420 ? 'back' : 'mid';
+      cfg.range <= 220 ? 'front' : cfg.range >= 290 ? 'back' : 'mid';
     const best = emptySlots.find((s) => s.tag === preferTag) || emptySlots[0];
     if (best) {
       return this.placePendingHeroAt(best.x, best.y).ok;
@@ -1630,7 +1825,7 @@ export class BattleWorld {
     let finalY = Math.round(y);
     let snappedSlotId: number | undefined;
     for (const s of this.suggestedSlots) {
-      if (Math.hypot(s.x - x, s.y - y) <= 34) {
+      if (Math.hypot(s.x - x, s.y - y) <= 64) {
         const occupied = Array.from(this.deployedHeroes.values()).some(
           (h) => h.heroId !== heroId && Math.hypot(h.x - s.x, h.y - s.y) < 30
         );
@@ -1660,7 +1855,7 @@ export class BattleWorld {
       this.revivedOnce = true;
       this.wallHp = this.maxWallHp;
       for (const m of this.monsters) {
-        if (!m.dead && m.y < 600) m.y = Math.min(1100, m.y + 240);
+        if (!m.dead && m.y < 600) this.pushMonsterBackAlongPath(m, 240);
       }
       this.phase = 'PLAYING';
       this.timeScale = this.userSpeed;
@@ -1676,11 +1871,97 @@ export class BattleWorld {
     });
   }
 
+  /** 绝境三选一（血量首次 <30% 触发）：0=援军(3名步兵守路尾15s) 1=全场冰冻3s 2=修城回血30% */
+  public selectCrisisOption(option: 0 | 1 | 2): boolean {
+    return this.asOp({ k: 'crisis', i: option }, () => {
+      if (this.phase !== 'CRISIS_CHOICE') return false;
+      if (option === 0) {
+        const guardDmg = Math.max(40, Math.round(this.lordBonus.baseAtk * 1.4));
+        const spots = [
+          { x: 300, y: WALL_Y + 75 },
+          { x: 375, y: WALL_Y + 95 },
+          { x: 450, y: WALL_Y + 75 },
+        ];
+        for (const p of spots) {
+          this.allyGuards.push({
+            id: this.nextUid++,
+            x: p.x,
+            y: p.y,
+            remainSec: 15.0,
+            attackCooldown: 0.2,
+            damage: guardDmg,
+          });
+        }
+        this.floatTexts.push({ x: LORD_POS.x, y: WALL_Y + 90, text: '援军抵达!', color: '#69F0AE', scale: 1.3, kind: 'heal' });
+      } else if (option === 1) {
+        for (const m of this.monsters) {
+          if (!m.dead) m.freezeTimer = Math.max(m.freezeTimer, 3.0);
+        }
+        this.vfxEvents.push({ type: 'ice_nova', x: 375, y: 650, radius: 480, color: '#4FC3F7', duration: 0.45 });
+        this.floatTexts.push({ x: 375, y: 650, text: '全场冰冻 3秒!', color: '#81D4FA', scale: 1.35, kind: 'warn' });
+      } else {
+        const heal = Math.round(this.maxWallHp * 0.3);
+        this.wallHp = Math.min(this.maxWallHp, this.wallHp + heal);
+        this.vfxEvents.push({ type: 'heal_wall', x: LORD_POS.x, y: WALL_Y, radius: 140, color: '#69F0AE', duration: 0.45 });
+        this.floatTexts.push({ x: LORD_POS.x, y: WALL_Y + 40, text: `+${heal}`, color: '#69F0AE', scale: 1.3, kind: 'heal', amount: heal });
+      }
+      this.resumeOrNextChoice();
+      return true;
+    });
+  }
+
   public getStars(): number {
     if (this.phase !== 'VICTORY') return 0;
-    if (this.wallHp >= this.maxWallHp) return 3;
-    if (this.wallHp >= this.maxWallHp * 0.5) return 2;
-    return 1;
+    let stars = 1; // ★ 通关
+    if (this.wallHp >= this.maxWallHp * 0.5) stars++; // ★ 城墙剩余 >=50%
+    if (this.combo.maxCombo >= 50) stars++;           // ★ 最高连斩 >=50
+    return stars;
+  }
+
+  public getTotalDamage(): number {
+    let sum = 0;
+    for (const v of Object.values(this.damageStats)) sum += v;
+    return sum;
+  }
+
+  // ---------- Debug 校准接口 ----------
+  public debugJumpWave(waveId: number): void {
+    this.waveDirector.jumpToWave(waveId, this.elapsed);
+  }
+
+  public debugKillAllMonsters(): void {
+    for (const m of this.monsters) {
+      if (!m.dead) m.hp = 0;
+    }
+    this.cleanupAndCheckEnd();
+  }
+
+  public debugAddExp(exp: number): void {
+    this.gainBattleExp(exp);
+  }
+
+  public debugDamageWallTo(targetRatio: number): void {
+    const targetHp = Math.max(1, Math.round(this.maxWallHp * targetRatio));
+    if (this.wallHp > targetHp) {
+      this.wallImmuneHits = 0;
+      const need = this.wallHp - targetHp;
+      const raw = Math.ceil(need / Math.max(0.1, 1 - this.wallDamageReduce));
+      this.damageWall(raw);
+    }
+  }
+
+  public getTelemetryReport() {
+    return {
+      stageId: this.stage.stageId,
+      elapsed: Math.round(this.elapsed * 10) / 10,
+      wave: this.waveDirector.currentWaveIndex,
+      battleLevel: this.battleLevel,
+      kills: this.kills,
+      maxCombo: this.combo.maxCombo,
+      wallHpRatio: Math.round((this.wallHp / Math.max(1, this.maxWallHp)) * 1000) / 1000,
+      levelUpTimes: this.levelUpTimes,
+      wallHpSamples: this.wallHpSamples,
+    };
   }
 
   public calcSettleReward(doubleReward = false): BattleReward {
@@ -1711,7 +1992,7 @@ export class BattleWorld {
         return;
       }
     }
-    if (this.pendingLevelUps > 0) {
+    if (this.pendingLevelUps > 0 || this.pendingChestChoices > 0) {
       this.triggerNextRogueChoice();
     } else {
       this.phase = 'PLAYING';
