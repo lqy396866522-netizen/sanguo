@@ -61,7 +61,7 @@ export interface MonsterConfig {
   healPctPerSec?: number;  // 军医每秒回血比例（如 0.03）
   healRadius?: number;     // 军医回血半径（如 150）
   explodeOnDeath?: boolean;
-  roleType?: 'normal' | 'shield' | 'cavalry' | 'medic' | 'elite' | 'boss';
+  roleType?: 'normal' | 'rabble' | 'shield' | 'cavalry' | 'medic' | 'elite' | 'boss';
   wallLeakPct?: number;    // 漏怪扣除城墙最大血量比例
   dropChest?: boolean;     // 击杀掉落宝箱（额外三选一）
   resistMelee: number;     // -1 ~ 0.9

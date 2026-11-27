@@ -200,8 +200,8 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H09', name: '貂蝉', title: '闭月倾城', camp: '群', roleLabel: '魅惑光环',
-    range: 245, rangeLabel: '中', attackInterval: 1.6, canHitAir: true,
-    dimDistance: 'magic', dimElement: 'physical', baseMultiplier: 1.15,
+    range: 245, rangeLabel: '中', attackInterval: 1.5, canHitAir: true,
+    dimDistance: 'magic', dimElement: 'physical', baseMultiplier: 1.35,
     skillName: '倾国之舞', skillDesc: '抛射花瓣球魅惑敌军停滞，并赋予射程内友军攻速光环',
     unlockType: 'LORD_LEVEL', unlockParam: 13, colorHex: '#F48FB1',
     affixes: [
@@ -214,8 +214,8 @@ export const HERO_CONFIGS: HeroConfig[] = [
   },
   {
     id: 'H10', name: '华佗', title: '神医妙手', camp: '群', roleLabel: '回血减抗',
-    range: 255, rangeLabel: '中', attackInterval: 2.0, canHitAir: true,
-    dimDistance: 'magic', dimElement: 'poison', baseMultiplier: 1.2,
+    range: 255, rangeLabel: '中', attackInterval: 1.75, canHitAir: true,
+    dimDistance: 'magic', dimElement: 'poison', baseMultiplier: 1.45,
     skillName: '青囊毒针', skillDesc: '银针降低目标全抗性，且每5次攻击回复主公城防血量',
     unlockType: 'LORD_LEVEL', unlockParam: 17, colorHex: '#80CBC4',
     affixes: [
@@ -263,6 +263,13 @@ export const MONSTER_CONFIGS: Record<string, MonsterConfig> = {
     resistMelee: 0, resistRanged: 0, resistMagic: 0,
     resistPhysical: 0, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
     colorHex: '#D4A359',
+  },
+  M_RABBLE: {
+    id: 'M_RABBLE', name: '黄巾溃兵', space: 'ground', speed: 62, baseHp: 300, wallDmg: 30, exp: 0.5, radius: 15,
+    roleType: 'rabble', wallLeakPct: 0.004,
+    resistMelee: 0, resistRanged: 0, resistMagic: 0,
+    resistPhysical: 0, resistFire: 0, resistLightning: 0, resistIce: 0, resistPoison: 0,
+    colorHex: '#C5B084',
   },
   M_RATTAN: {
     id: 'M_RATTAN', name: '藤甲重盾', space: 'ground', speed: 40, baseHp: 520, wallDmg: 70, exp: 2, radius: 22,

@@ -25,7 +25,15 @@ import { CHALLENGE_RULES, ELITE_AFFIXES, getWeaponConfig, type EliteAffixId } fr
 import { EventBus } from './EventBus.ts';
 import { ComboSystem } from './ComboSystem.ts';
 import { WaveDirector } from './WaveDirector.ts';
-import { getExpToNextLevel, getTargetTimeForLevel, RUN_CONFIG, type EnemyRoleType } from './RunConfig.ts';
+import {
+  getCatchupExpMult,
+  getExpToNextLevel,
+  getTargetTimeForLevel,
+  getWaveHpScale,
+  RUN_CONFIG,
+  type EnemyRoleType,
+  type WaveKind,
+} from './RunConfig.ts';
 
 export const FIXED_DT = 1 / 30;
 export const WALL_Y = 265;
@@ -91,6 +99,20 @@ export interface MonsterUnit {
   prevY: number;
   hp: number;
   maxHp: number;
+  shieldHp: number;
+  maxShieldHp: number;
+  aoeImmuneTimer: number;
+  knockbackImmuneTimer: number;
+  hasEntryShield: boolean;
+  pathTotalLen: number;
+  pathTraveled: number;
+  speedMult: number;
+  waveId: number;
+  waveKind: WaveKind;
+  leakedExpGiven: boolean;
+  bossPhase: 1 | 2 | 3;
+  isTargetDummy?: boolean;
+  dummyTimer?: number;
   hitStopTimer: number;
   elite?: EliteAffixId;
   pathIndex: number;
@@ -257,10 +279,26 @@ export class BattleWorld {
 
   // 绝境三选一 & 精英宝箱 & 校准采样
   public crisisTriggered = false;
+  public crisisCatchupTimer = 0;
+  public nextChoiceDelay = 0;
   public pendingChestChoices = 0;
   public currentChoiceIsChest = false;
   public levelUpTimes: { level: number; elapsed: number; target: number | null }[] = [];
   public wallHpSamples: { t: number; ratio: number }[] = [];
+  public killDepthByKind: Record<WaveKind, { sum: number; count: number }> = {
+    opening: { sum: 0, count: 0 },
+    build: { sum: 0, count: 0 },
+    form: { sum: 0, count: 0 },
+    pressure: { sum: 0, count: 0 },
+    release: { sum: 0, count: 0 },
+    boss: { sum: 0, count: 0 },
+  };
+  public bossSpawnedAt = 0;
+  public bossKilledAt = 0;
+  public bossKillDepth = 0;
+  public catchupBoostCount = 0;
+  public targetDummyDamage = 0;
+  private pathLengths: number[] = [];
   private nextWallSampleAt = 0;
   private lastKillWasCrit = false;
 
@@ -313,6 +351,13 @@ export class BattleWorld {
     this.expNeeded = getExpToNextLevel(1);
 
     this.combo = new ComboSystem(this.events);
+    this.pathLengths = this.stage.paths.map((path) => {
+      let total = 0;
+      for (let i = 0; i < path.length - 1; i++) {
+        total += Math.hypot(path[i + 1].x - path[i].x, path[i + 1].y - path[i].y);
+      }
+      return Math.max(1, total);
+    });
     const stageHpScale = this.stage.waves[0]?.hpScale || 1;
     this.waveDirector = new WaveDirector(this.stage.bossId, stageHpScale, this.events);
 
@@ -434,6 +479,7 @@ export class BattleWorld {
     const path = this.stage.paths[m.pathIndex];
     if (!path || path.length < 2) return;
     let remain = distPx;
+    let pushed = 0;
     while (remain > 0 && m.waypointIndex >= 1) {
       const prevWp = path[m.waypointIndex - 1];
       const dx = prevWp.x - m.x;
@@ -443,16 +489,19 @@ export class BattleWorld {
         m.x = prevWp.x;
         m.y = prevWp.y;
         remain -= segDist;
+        pushed += segDist;
         if (m.waypointIndex > 1) m.waypointIndex--;
         else break;
       } else if (segDist > 0.001) {
         m.x += (dx / segDist) * remain;
         m.y += (dy / segDist) * remain;
+        pushed += remain;
         remain = 0;
       } else {
         break;
       }
     }
+    m.pathTraveled = Math.max(0, m.pathTraveled - pushed);
   }
 
   public minDistToPaths(x: number, y: number): number {
@@ -555,6 +604,14 @@ export class BattleWorld {
 
     if (this.swapCooldown > 0) this.swapCooldown = Math.max(0, this.swapCooldown - dt);
     if (this.lordAttackAnimTimer > 0) this.lordAttackAnimTimer = Math.max(0, this.lordAttackAnimTimer - dt);
+    if (this.crisisCatchupTimer > 0) this.crisisCatchupTimer = Math.max(0, this.crisisCatchupTimer - dt);
+    if (this.nextChoiceDelay > 0) {
+      this.nextChoiceDelay = Math.max(0, this.nextChoiceDelay - dt);
+      if (this.nextChoiceDelay === 0 && this.phase === 'PLAYING' && (this.pendingLevelUps > 0 || this.pendingChestChoices > 0)) {
+        this.triggerNextRogueChoice();
+        return;
+      }
+    }
 
     // 1. 刷新武将禁锢计时
     for (const [hid, rem] of this.lockedHeroes.entries()) {
@@ -587,12 +644,49 @@ export class BattleWorld {
   }
 
   private updateWaves(): void {
-    this.waveDirector.update(this.elapsed, this.monsters.length, {
-      spawnMonster: (monsterId, _roleType, hpScale, isBoss) => {
-        this.spawnMonster(monsterId, 0, hpScale);
-        if (isBoss) this.bossSpawned = true;
+    let aliveCount = 0;
+    let aliveTotalHp = 0;
+    for (const m of this.monsters) {
+      if (!m.dead && !m.isTargetDummy) {
+        aliveCount++;
+        aliveTotalHp += Math.max(0, m.hp) + Math.max(0, m.shieldHp);
+      }
+    }
+    this.waveDirector.update(
+      this.elapsed,
+      aliveCount,
+      {
+        spawnMonster: (monsterId, _roleType, hpScale, isBoss, meta) => {
+          const spawned = this.spawnMonster(monsterId, 0, hpScale, undefined, true, meta);
+          if (isBoss && spawned) {
+            this.bossSpawned = true;
+            this.bossSpawnedAt = this.elapsed;
+            // Boss 一阶段伴随精英护卫登场（§8.2）
+            const escortCount = RUN_CONFIG.boss.escortCount;
+            const escortHpScale = this.waveDirector.stageHpScale * getWaveHpScale(meta?.waveId ?? 20) * 0.25;
+            for (let e = 0; e < escortCount; e++) {
+              const offsetX = e === 0 ? -24 : 24;
+              this.spawnMonster(
+                'M_ELITE_GEN',
+                0,
+                escortHpScale,
+                { x: spawned.x + offsetX, y: spawned.y },
+                false,
+                { waveId: meta?.waveId ?? 20, waveKind: 'boss', speedMult: 1.0 }
+              );
+            }
+          }
+        },
+        onWaveCompleted: () => {
+          // 波次结算保底经验（§7.2）：每波完成 +当前升级所需经验的 12%
+          const bonus = this.expNeeded * RUN_CONFIG.waveClearExpRatio;
+          if (bonus > 0) {
+            this.gainBattleExp(bonus, false);
+          }
+        },
       },
-    });
+      aliveTotalHp
+    );
   }
 
   private updateAllyGuards(dt: number): void {
@@ -644,10 +738,18 @@ export class BattleWorld {
     return this.grid.query(x, y, r + 90, this.gridBuf);
   }
 
-  public spawnMonster(monsterId: string, pathIndex: number, hpScale = 1, customPos?: Vec2Point, allowElite = true): MonsterUnit | null {
+  public spawnMonster(
+    monsterId: string,
+    pathIndex: number,
+    hpScale = 1,
+    customPos?: Vec2Point,
+    allowElite = true,
+    meta?: { waveId?: number; waveKind?: WaveKind; speedMult?: number; overrideMaxHp?: number }
+  ): MonsterUnit | null {
     const cfg = MONSTER_CONFIGS[monsterId];
     if (!cfg) return null;
-    const path = this.stage.paths[pathIndex % this.stage.paths.length];
+    const pIdx = pathIndex % this.stage.paths.length;
+    const path = this.stage.paths[pIdx];
     const start = customPos || path[0];
     let elite: EliteAffixId | undefined;
     let scale = hpScale;
@@ -659,8 +761,13 @@ export class BattleWorld {
         elite = ids[Math.floor(this.rng() * ids.length)];
       }
     }
-    const maxHp = Math.round(cfg.baseHp * scale);
+    const rawMaxHp = meta?.overrideMaxHp
+      ? Math.round(meta.overrideMaxHp * (this.challenge ? CHALLENGE_RULES.hpScale : 1))
+      : Math.round(cfg.baseHp * scale);
+    const maxHp = Math.max(1, rawMaxHp);
     const x0 = start.x + (this.rng() - 0.5) * 14;
+    const roleType = cfg.roleType || (cfg.isBoss ? 'boss' : 'normal');
+    const pathTotalLen = this.pathLengths[pIdx] || 1400;
     const m: MonsterUnit = {
       uid: this.nextUid++,
       config: cfg,
@@ -670,9 +777,21 @@ export class BattleWorld {
       prevY: start.y,
       hp: maxHp,
       maxHp,
+      shieldHp: 0,
+      maxShieldHp: 0,
+      aoeImmuneTimer: 0,
+      knockbackImmuneTimer: 0,
+      hasEntryShield: roleType !== 'rabble',
+      pathTotalLen,
+      pathTraveled: 0,
+      speedMult: meta?.speedMult ?? 1.0,
+      waveId: meta?.waveId ?? Math.max(1, this.waveDirector.currentWaveIndex),
+      waveKind: meta?.waveKind ?? this.waveDirector.currentWaveKind,
+      leakedExpGiven: false,
+      bossPhase: 1,
       hitStopTimer: 0,
       elite,
-      pathIndex: pathIndex % this.stage.paths.length,
+      pathIndex: pIdx,
       waypointIndex: 1,
       attackCooldown: 0.6,
       healerTimer: cfg.healerInterval || 4.0,
@@ -690,6 +809,20 @@ export class BattleWorld {
       dead: false,
     };
     this.monsters.push(m);
+    return m;
+  }
+
+  /** 靶场调试模式（§10.1）：在战场中心生成不死木桩，供测量全体武将真实 DPS(t) */
+  public spawnTargetDummy(durationSec = 10, pos?: Vec2Point): MonsterUnit | null {
+    const spot = pos || { x: 375, y: 740 };
+    const m = this.spawnMonster('M_INFANTRY', 0, 10000, spot, false, { waveId: this.waveDirector.currentWaveIndex || 1, waveKind: 'form', speedMult: 0 });
+    if (!m) return null;
+    m.maxHp = 1e9;
+    m.hp = 1e9;
+    m.hasEntryShield = false;
+    m.isTargetDummy = true;
+    m.dummyTimer = durationSec;
+    this.targetDummyDamage = 0;
     return m;
   }
 
@@ -1200,7 +1333,17 @@ export class BattleWorld {
     for (const m of this.monsters) {
       if (m.dead) continue;
 
+      if (m.isTargetDummy) {
+        if (m.dummyTimer !== undefined) {
+          m.dummyTimer -= dt;
+          if (m.dummyTimer <= 0) m.dead = true;
+        }
+        continue;
+      }
+
       if (m.hitFlashTimer > 0) m.hitFlashTimer = Math.max(0, m.hitFlashTimer - dt);
+      if (m.aoeImmuneTimer > 0) m.aoeImmuneTimer = Math.max(0, m.aoeImmuneTimer - dt);
+      if (m.knockbackImmuneTimer > 0) m.knockbackImmuneTimer = Math.max(0, m.knockbackImmuneTimer - dt);
       if (m.slowTimer > 0) m.slowTimer -= dt; else m.slowRatio = 0;
       if (m.freezeTimer > 0) m.freezeTimer -= dt;
       if (m.stunTimer > 0) m.stunTimer -= dt;
@@ -1265,14 +1408,35 @@ export class BattleWorld {
       const siegeStop = m.config.isRangedSiege && m.config.siegeStopY && m.y <= m.config.siegeStopY;
       const atWall = m.y <= WALL_Y + 25;
 
+      // 270s 后狂暴计时（§8.3）：每 10s 全场敌人 +10% 移速与攻城伤
+      const overtimeSteps = this.elapsed > RUN_CONFIG.boss.enrageAfterSec
+        ? Math.floor((this.elapsed - RUN_CONFIG.boss.enrageAfterSec) / RUN_CONFIG.boss.enrageStepSec) + 1
+        : 0;
+      const overtimeMult = 1 + overtimeSteps * RUN_CONFIG.boss.enrageStepMult;
+
       if (atWall || siegeStop) {
+        // 漏怪首次抵达城门时给予 50% 经验（§7.2），并记入击杀深度 100%
+        if (!m.leakedExpGiven) {
+          m.leakedExpGiven = true;
+          m.pathTraveled = m.pathTotalLen;
+          const role: EnemyRoleType = m.config.roleType || (m.config.isBoss ? 'boss' : 'normal');
+          const baseExp = RUN_CONFIG.expByRole[role] ?? m.config.exp;
+          if (!m.config.isBoss) {
+            this.gainBattleExp(baseExp * RUN_CONFIG.leakExpRatio, true);
+            this.recordKillDepth(m.waveKind, 1.0);
+          }
+        }
         m.attackCooldown -= dt;
         if (m.attackCooldown <= 0) {
-          m.attackCooldown = 1.2;
-          const role = m.config.roleType || (m.config.isBoss ? 'boss' : 'normal');
-          const leakPct = m.config.wallLeakPct ?? RUN_CONFIG.wallLeakPct[role];
+          const isBossUnit = !!m.config.isBoss;
+          m.attackCooldown = isBossUnit ? 1.0 : 1.2;
+          const role: EnemyRoleType = m.config.roleType || (isBossUnit ? 'boss' : 'normal');
+          const leakPct = isBossUnit
+            ? RUN_CONFIG.boss.wallDpsPct
+            : (m.config.wallLeakPct ?? RUN_CONFIG.wallLeakPct[role]);
           const baseWallDmg = leakPct ? Math.round(this.maxWallHp * leakPct) : m.config.wallDmg;
-          const rawDmg = baseWallDmg * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1);
+          const phase3Mult = isBossUnit && m.bossPhase === 3 ? RUN_CONFIG.boss.phase3WallDmgMult : 1;
+          const rawDmg = baseWallDmg * phase3Mult * overtimeMult * (this.challenge ? CHALLENGE_RULES.wallDmgScale : 1);
           this.damageWall(rawDmg);
           const thornsPct = ((this.lordBonus.gemEffects.wall_thorns || 0) + (this.lordBonus.talismanEffects?.wallThornsPct || 0)) / 100;
           if (thornsPct > 0 && !m.dead) {
@@ -1291,16 +1455,28 @@ export class BattleWorld {
       const dist = Math.hypot(dx, dy);
       const barricadeLv = this.lordBonus.barricadeLevel || 0;
       const barricadeSlow = barricadeLv > 0 && m.config.space === 'ground' && m.y <= WALL_Y + BARRICADE_DEPTH ? 0.06 * barricadeLv : 0;
-      const speedMult = (m.enraged ? 1.45 : 1.0) * (m.elite === 'swift' ? 1.3 : 1.0) * (1 - Math.min(0.65, m.slowRatio + barricadeSlow));
-      const moveDist = m.config.speed * speedMult * dt;
+      const baseSpeed = m.config.isBoss
+        ? Math.max(m.config.speed, Math.round(MONSTER_CONFIGS.M_INFANTRY.speed * RUN_CONFIG.boss.speedMult))
+        : m.config.speed;
+      const bossPhaseSpd = m.config.isBoss && m.bossPhase === 3 ? RUN_CONFIG.boss.phase3SpeedMult : 1.0;
+      const enragedSpd = m.enraged && !m.config.isBoss ? 1.45 : 1.0;
+      const speedMult = m.speedMult
+        * bossPhaseSpd
+        * enragedSpd
+        * overtimeMult
+        * (m.elite === 'swift' ? 1.3 : 1.0)
+        * (1 - Math.min(0.65, m.slowRatio + barricadeSlow));
+      const moveDist = baseSpeed * speedMult * dt;
 
       if (dist <= moveDist) {
         m.x = wp.x;
         m.y = wp.y;
+        m.pathTraveled = Math.min(m.pathTotalLen, m.pathTraveled + dist);
         if (m.waypointIndex < path.length - 1) m.waypointIndex++;
       } else if (dist > 0.001) {
         m.x += (dx / dist) * moveDist;
         m.y += (dy / dist) * moveDist;
+        m.pathTraveled = Math.min(m.pathTotalLen, m.pathTraveled + moveDist);
       }
     }
   }
@@ -1308,7 +1484,41 @@ export class BattleWorld {
   private updateBossBehavior(m: MonsterUnit, dt: number): void {
     m.bossTimer -= dt;
     const id = m.config.id;
-    if (id === 'BOSS_LUBU' && !m.enraged && m.hp / m.maxHp <= 0.5) {
+    const hpRatio = m.hp / Math.max(1, m.maxHp);
+
+    // 通用 Boss 二阶段（§8.2）：血量 <=70% 获得 5% 护盾 + 0.5s 免疫 AOE + 召唤小兵潮
+    if (m.bossPhase === 1 && hpRatio <= RUN_CONFIG.boss.phase2HpRatio) {
+      m.bossPhase = 2;
+      const shield = Math.max(50, Math.round(m.maxHp * RUN_CONFIG.boss.phase2ShieldRatio));
+      m.shieldHp = shield;
+      m.maxShieldHp = shield;
+      m.aoeImmuneTimer = Math.max(m.aoeImmuneTimer, RUN_CONFIG.boss.phase2AoeImmuneSec);
+      this.floatTexts.push({ x: m.x, y: m.y + 46, text: '护盾展开 · 伏兵现身!', color: '#40C4FF', scale: 1.3, kind: 'warn' });
+      const summonScale = this.waveDirector.stageHpScale * getWaveHpScale(m.waveId) * 0.35;
+      const summonCount = RUN_CONFIG.boss.phase2SummonCount;
+      for (let i = 0; i < summonCount; i++) {
+        const ox = ((i % 5) - 2) * 22;
+        const oy = Math.floor(i / 5) * 18 - 9;
+        const child = this.spawnMonster('M_RABBLE', m.pathIndex, summonScale, { x: m.x + ox, y: m.y + oy }, false, {
+          waveId: m.waveId,
+          waveKind: 'boss',
+          speedMult: 1.0,
+        });
+        if (child) {
+          child.waypointIndex = m.waypointIndex;
+          child.pathTraveled = m.pathTraveled;
+        }
+      }
+    }
+
+    // 通用 Boss 三阶段（§8.2）：血量 <=35% 进入狂暴（移速+40%，攻城更猛）
+    if (m.bossPhase < 3 && hpRatio <= RUN_CONFIG.boss.phase3HpRatio) {
+      m.bossPhase = 3;
+      m.enraged = true;
+      this.floatTexts.push({ x: m.x, y: m.y + 48, text: 'Boss 狂暴冲锋!', color: '#FF1744', scale: 1.4, kind: 'warn' });
+    }
+
+    if (id === 'BOSS_LUBU' && !m.enraged && hpRatio <= 0.5) {
       m.enraged = true;
       this.floatTexts.push({ x: m.x, y: m.y + 45, text: '无双狂暴!', color: '#FF1744', scale: 1.4 });
     }
@@ -1357,6 +1567,10 @@ export class BattleWorld {
     // 血量首次跌破 30% 时触发「绝境三选一」（每局一次）
     if (!this.crisisTriggered && this.wallHp > 0 && this.wallHp / this.maxWallHp < RUN_CONFIG.crisisThreshold) {
       this.crisisTriggered = true;
+      // W12 之前触发绝境，额外赠送 20 秒 ×1.5 追赶经验加成（§7.6）
+      if (this.waveDirector.currentWaveIndex <= RUN_CONFIG.crisisCatchupMaxWave) {
+        this.crisisCatchupTimer = RUN_CONFIG.crisisCatchupSec;
+      }
       this.events.emit('crisis_triggered', { wallHpRatio: this.wallHp / this.maxWallHp });
       if (this.phase === 'PLAYING') {
         this.phase = 'CRISIS_CHOICE';
@@ -1377,6 +1591,13 @@ export class BattleWorld {
   // fx/fy：攻击来向（用于火花朝向与击退方向），缺省取攻击者站位
   private applyHit(sourceId: string, m: MonsterUnit, atk: AttackCalcParams, fx?: number, fy?: number) {
     const inferredAoeOrPierce = atk.isAoeOrPierce ?? (atk.dimDistance === 'magic' || atk.dimDistance === 'melee');
+    if (m.aoeImmuneTimer > 0 && inferredAoeOrPierce) {
+      if (this.floatTexts.length < 60) {
+        this.floatTexts.push({ x: m.x, y: m.y + 26, text: '护盾免AOE', color: '#80D8FF', scale: 0.85, kind: 'warn' });
+      }
+      return { damage: 0, isCrit: false, isSuperCrit: false, tag: 'resist' as const };
+    }
+
     const res = calculateDamage({ ...atk, isAoeOrPierce: inferredAoeOrPierce }, {
       config: m.config,
       shredPhysical: m.shredPhysical,
@@ -1390,16 +1611,38 @@ export class BattleWorld {
       return res;
     }
 
-    m.hp -= res.damage;
+    // 入口冲锋护体（§6.2）：前 25% 路径减伤 30% 并线性归零（杂兵无护体）
+    let finalDmg = res.damage;
+    if (m.hasEntryShield && !m.isTargetDummy && m.pathTotalLen > 0) {
+      const depth = m.pathTraveled / m.pathTotalLen;
+      if (depth < RUN_CONFIG.entryShieldDistRatio) {
+        const mult = (1 - RUN_CONFIG.entryShieldReduce)
+          + RUN_CONFIG.entryShieldReduce * Math.min(1, depth / RUN_CONFIG.entryShieldDistRatio);
+        finalDmg = Math.max(1, Math.round(finalDmg * mult));
+      }
+    }
+
+    if (m.isTargetDummy) {
+      this.targetDummyDamage += finalDmg;
+      m.hp = m.maxHp;
+    } else if (m.shieldHp > 0) {
+      const absorbed = Math.min(m.shieldHp, finalDmg);
+      m.shieldHp -= absorbed;
+      const remain = finalDmg - absorbed;
+      if (remain > 0) m.hp -= remain;
+    } else {
+      m.hp -= finalDmg;
+    }
+
     if (m.hp <= 0) this.lastKillWasCrit = res.isCrit;
     m.hitFlashTimer = 0.08;
-    this.damageStats[sourceId] = (this.damageStats[sourceId] || 0) + res.damage;
+    this.damageStats[sourceId] = (this.damageStats[sourceId] || 0) + finalDmg;
 
     this.events.emit('enemy_damaged', {
       uid: m.uid,
       x: m.x,
       y: m.y,
-      damage: res.damage,
+      damage: finalDmg,
       isCrit: res.isCrit,
       isSuperCrit: !!res.isSuperCrit,
       tag: res.tag,
@@ -1410,8 +1653,9 @@ export class BattleWorld {
       const cmdThunder = this.lordSkillLevels['LS_THUNDER'] || 0;
       const wpnThunder = getWeaponConfig(this.lordBonus.weaponId).thunderChance;
       const tChance = Math.min(0.45, cmdThunder * 0.1 + wpnThunder * 0.5);
-      if (tChance > 0 && this.rng() < tChance) {
+      if (tChance > 0 && this.rng() < tChance && m.knockbackImmuneTimer <= 0) {
         m.stunTimer = Math.max(m.stunTimer, 0.5);
+        m.knockbackImmuneTimer = RUN_CONFIG.knockbackImmuneSec;
         if (this.vfxEvents.length < 120) {
           this.vfxEvents.push({
             type: 'lightning_chain', x: m.x, y: m.y + 40,
@@ -1422,10 +1666,13 @@ export class BattleWorld {
       }
     }
 
-    // 打击感：按单位顿帧（不做全局减速）+ 暴击分级击退 + 沿来向迸发火花
+    // 打击感：按单位顿帧 + 暴击分级击退（带 1.0s 单怪内置冷却防原地罚站）+ 沿来向迸发火花
     const heavy = res.isCrit || atk.dimDistance === 'melee';
     if (heavy) {
-      m.hitStopTimer = Math.max(m.hitStopTimer, res.isCrit ? 0.1 : 0.05);
+      const canCrowdCtrl = m.knockbackImmuneTimer <= 0 && !m.isTargetDummy;
+      if (canCrowdCtrl) {
+        m.hitStopTimer = Math.max(m.hitStopTimer, res.isCrit ? 0.08 : 0.04);
+      }
       let sx = fx;
       let sy = fy;
       if (sx === undefined || sy === undefined) {
@@ -1436,9 +1683,10 @@ export class BattleWorld {
       const dx = m.x - sx;
       const dy = m.y - sy;
       const len = Math.hypot(dx, dy) || 1;
-      if (res.isCrit && !m.config.isBoss && m.config.space === 'ground') {
+      if (canCrowdCtrl && res.isCrit && !m.config.isBoss && m.config.space === 'ground') {
         const push = atk.dimDistance === 'melee' ? 12 : 6;
         this.pushMonsterBackAlongPath(m, push);
+        m.knockbackImmuneTimer = RUN_CONFIG.knockbackImmuneSec;
       }
       if (this.vfxEvents.length < 120) {
         const r = m.config.radius;
@@ -1453,24 +1701,37 @@ export class BattleWorld {
 
     let color = '#FFFFFF';
     let scale = 0.85;
-    let text = `${res.damage}`;
+    let text = `${finalDmg}`;
     let kind: FloatTextEvent['kind'] = 'normal';
-    if (res.isSuperCrit) { color = '#FF5252'; scale = 1.45; text = `暴击 ${res.damage}!`; kind = 'superCrit'; }
-    else if (res.tag === 'crit') { color = '#FFD54F'; scale = 1.25; text = `暴击 ${res.damage}`; kind = 'crit'; }
-    else if (res.tag === 'weak') { color = '#FF8A65'; scale = 1.05; text = `${res.damage}!`; }
-    else if (res.tag === 'resist') { color = '#90A4AE'; scale = 0.75; text = `${res.damage}(抗)`; }
+    if (res.isSuperCrit) { color = '#FF5252'; scale = 1.45; text = `暴击 ${finalDmg}!`; kind = 'superCrit'; }
+    else if (res.tag === 'crit') { color = '#FFD54F'; scale = 1.25; text = `暴击 ${finalDmg}`; kind = 'crit'; }
+    else if (res.tag === 'weak') { color = '#FF8A65'; scale = 1.05; text = `${finalDmg}!`; }
+    else if (res.tag === 'resist') { color = '#90A4AE'; scale = 0.75; text = `${finalDmg}(抗)`; }
 
     // 先消耗随机数再判断上限：飘字队列长度受表现层消费影响，不能让它改变逻辑随机序列
     const jitter = (this.rng() - 0.5) * 18;
     if (this.floatTexts.length < 60) {
-      this.floatTexts.push({ x: m.x + jitter, y: m.y + 18, text, color, scale, targetUid: m.uid, amount: res.damage, kind });
+      this.floatTexts.push({ x: m.x + jitter, y: m.y + 18, text, color, scale, targetUid: m.uid, amount: finalDmg, kind });
     }
-    return res;
+    return { ...res, damage: finalDmg };
+  }
+
+  private recordKillDepth(kind: WaveKind, depthRatio: number): void {
+    const clamped = Math.max(0, Math.min(1, depthRatio));
+    const slot = this.killDepthByKind[kind];
+    if (slot) {
+      slot.sum += clamped;
+      slot.count++;
+    }
   }
 
   private cleanupAndCheckEnd(): void {
     for (let i = this.monsters.length - 1; i >= 0; i--) {
       const m = this.monsters[i];
+      if (m.isTargetDummy && m.dead) {
+        this.monsters.splice(i, 1);
+        continue;
+      }
       if (m.hp <= 0 && !m.dead) {
         m.dead = true;
         this.kills++;
@@ -1478,13 +1739,22 @@ export class BattleWorld {
         const roleType: EnemyRoleType = m.config.roleType || (m.config.isBoss ? 'boss' : 'normal');
         const isElite = roleType === 'elite';
         const isBoss = !!m.config.isBoss;
-        if (isBoss) this.bossKilled = true;
+        const depthRatio = m.pathTotalLen > 0 ? m.pathTraveled / m.pathTotalLen : 0;
+        if (!m.leakedExpGiven) {
+          this.recordKillDepth(m.waveKind, depthRatio);
+        }
+        if (isBoss) {
+          this.bossKilled = true;
+          this.bossKilledAt = this.elapsed;
+          this.bossKillDepth = Math.max(0, Math.min(1, depthRatio));
+        }
         if (m.config.explodeOnDeath && m.y <= WALL_Y + 95) {
           this.damageWall(m.config.wallDmg);
         }
 
         const baseExp = RUN_CONFIG.expByRole[roleType] ?? m.config.exp;
-        const expGain = baseExp * RUN_CONFIG.monsterExpScale;
+        // 若已给过漏怪 50% 经验，击杀时只补发剩余 50%
+        const expGain = m.leakedExpGiven ? baseExp * (1 - RUN_CONFIG.leakExpRatio) : baseExp;
         this.events.emit('enemy_killed', {
           uid: m.uid,
           monsterId: m.config.id,
@@ -1503,12 +1773,15 @@ export class BattleWorld {
           this.events.emit('elite_chest_dropped', { x: m.x, y: m.y });
         }
 
-        this.gainBattleExp(expGain);
+        this.gainBattleExp(expGain, true);
         this.monsters.splice(i, 1);
         if (m.elite === 'split') {
           for (let k = 0; k < 2; k++) {
             const child = this.spawnMonster('M_INFANTRY', m.pathIndex, 0.4, { x: m.x + (k ? 18 : -18), y: m.y }, false);
-            if (child) child.waypointIndex = m.waypointIndex;
+            if (child) {
+              child.waypointIndex = m.waypointIndex;
+              child.pathTraveled = m.pathTraveled;
+            }
           }
         }
       }
@@ -1525,19 +1798,28 @@ export class BattleWorld {
       return;
     }
 
-    if (this.waveDirector.allWavesSpawned && this.monsters.length === 0 && this.bossKilled) {
+    const aliveReal = this.monsters.some((m) => !m.dead && !m.isTargetDummy);
+    if (this.waveDirector.allWavesSpawned && !aliveReal && this.bossKilled) {
       this.phase = 'VICTORY';
       this.timeScale = 0;
       return;
     }
 
-    if ((this.pendingLevelUps > 0 || this.pendingChestChoices > 0) && this.phase === 'PLAYING') {
+    if ((this.pendingLevelUps > 0 || this.pendingChestChoices > 0) && this.phase === 'PLAYING' && this.nextChoiceDelay <= 0) {
       this.triggerNextRogueChoice();
     }
   }
 
-  private gainBattleExp(exp: number): void {
-    const gained = Math.max(0, exp * (1 + (this.lordBonus.expGainPct || 0) / 100));
+  public getCurrentCatchupMult(): number {
+    const base = getCatchupExpMult(this.elapsed, this.battleLevel);
+    const crisis = this.crisisCatchupTimer > 0 ? RUN_CONFIG.crisisCatchupMult : 1.0;
+    return base * crisis;
+  }
+
+  private gainBattleExp(exp: number, applyCatchup = true): void {
+    const catchupMult = applyCatchup ? this.getCurrentCatchupMult() : 1.0;
+    if (catchupMult > 1.01) this.catchupBoostCount++;
+    const gained = Math.max(0, exp * catchupMult * (1 + (this.lordBonus.expGainPct || 0) / 100));
     this.battleExp += gained;
     while (this.battleExp + 1e-6 >= this.expNeeded) {
       this.battleExp = Math.max(0, this.battleExp - this.expNeeded);
@@ -1548,7 +1830,7 @@ export class BattleWorld {
       this.levelUpTimes.push({ level: this.battleLevel, elapsed: Math.round(this.elapsed * 10) / 10, target });
       this.events.emit('level_up', { level: this.battleLevel, elapsed: this.elapsed, targetTime: target });
     }
-    if (this.pendingLevelUps > 0 && this.phase === 'PLAYING') {
+    if (this.pendingLevelUps > 0 && this.phase === 'PLAYING' && this.nextChoiceDelay <= 0) {
       this.triggerNextRogueChoice();
     }
   }
@@ -1579,6 +1861,7 @@ export class BattleWorld {
       lordSkillLevels: this.lordSkillLevels,
       heroSaves: this.heroSaves,
       wallHpRatio: this.wallHp / this.maxWallHp,
+      isChest: this.currentChoiceIsChest,
       rng: this.rng,
     });
 
@@ -1617,6 +1900,7 @@ export class BattleWorld {
       lordSkillLevels: this.lordSkillLevels,
       heroSaves: this.heroSaves,
       wallHpRatio: this.wallHp / this.maxWallHp,
+      isChest: this.currentChoiceIsChest,
       excludeCardUids: this.lastRogueCardUids,
       rng: this.rng,
     });
@@ -1769,8 +2053,11 @@ export class BattleWorld {
     const emptySlots = this.suggestedSlots.filter(
       (s) => !Array.from(this.deployedHeroes.values()).some((h) => Math.hypot(h.x - s.x, h.y - s.y) < 35)
     );
+    // 首发武将优先前置/中排接敌，避免远程首发站在后排干等 15 秒无法升 Lv.2
     const preferTag: SlotPos['tag'] =
-      cfg.range <= 220 ? 'front' : cfg.range >= 290 ? 'back' : 'mid';
+      this.deployedHeroes.size === 0
+        ? (cfg.range <= 240 ? 'front' : 'mid')
+        : (cfg.range <= 220 ? 'front' : cfg.range >= 290 ? 'back' : 'mid');
     const best = emptySlots.find((s) => s.tag === preferTag) || emptySlots[0];
     if (best) {
       return this.placePendingHeroAt(best.x, best.y).ok;
@@ -1951,17 +2238,36 @@ export class BattleWorld {
     }
   }
 
+  public getAvgKillDepthByKind(): Record<WaveKind, number> {
+    const out = {} as Record<WaveKind, number>;
+    for (const k of Object.keys(this.killDepthByKind) as WaveKind[]) {
+      const s = this.killDepthByKind[k];
+      out[k] = s.count > 0 ? Math.round((s.sum / s.count) * 1000) / 1000 : 0;
+    }
+    return out;
+  }
+
   public getTelemetryReport() {
     return {
       stageId: this.stage.stageId,
       elapsed: Math.round(this.elapsed * 10) / 10,
       wave: this.waveDirector.currentWaveIndex,
+      waveKind: this.waveDirector.currentWaveKind,
       battleLevel: this.battleLevel,
       kills: this.kills,
       maxCombo: this.combo.maxCombo,
       wallHpRatio: Math.round((this.wallHp / Math.max(1, this.maxWallHp)) * 1000) / 1000,
+      killDepthByKind: this.getAvgKillDepthByKind(),
+      bossKillTimeSec: this.bossKilled && this.bossSpawnedAt > 0
+        ? Math.round((this.bossKilledAt - this.bossSpawnedAt) * 10) / 10
+        : null,
+      bossKillDepth: Math.round(this.bossKillDepth * 1000) / 1000,
+      downwardAssistTriggers: this.waveDirector.downwardAssistTriggers,
+      catchupBoostCount: this.catchupBoostCount,
+      waveRecords: this.waveDirector.waveRecords,
       levelUpTimes: this.levelUpTimes,
       wallHpSamples: this.wallHpSamples,
+      damageStats: { ...this.damageStats },
     };
   }
 
@@ -1994,7 +2300,14 @@ export class BattleWorld {
       }
     }
     if (this.pendingLevelUps > 0 || this.pendingChestChoices > 0) {
-      this.triggerNextRogueChoice();
+      // 连升多级不堵塞战斗（§5.1）：非开局阶段先给 0.5 秒战斗画面，让刚选的强化立刻生效
+      if (!this.currentChoiceIsOpening && this.elapsed > 0) {
+        this.nextChoiceDelay = RUN_CONFIG.multiLevelUpDelaySec;
+        this.phase = 'PLAYING';
+        this.timeScale = this.userSpeed;
+      } else {
+        this.triggerNextRogueChoice();
+      }
     } else {
       this.phase = 'PLAYING';
       this.timeScale = this.userSpeed;

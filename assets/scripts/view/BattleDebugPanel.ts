@@ -114,15 +114,19 @@ export class BattleDebugPanel {
       ? `Lv${lastLv.level}: ${lastLv.elapsed}s (目标${lastLv.target}s, 差${(lastLv.elapsed - lastLv.target >= 0 ? '+' : '') + (lastLv.elapsed - lastLv.target).toFixed(1)}s)`
       : '尚无升级记录';
     const hpPct = Math.round((w.wallHp / Math.max(1, w.maxWallHp)) * 100);
+    const depths = w.getAvgKillDepthByKind();
+    const pDepth = Math.round((depths.pressure || 0) * 100);
+    const rDepth = Math.round((depths.release || 0) * 100);
+    const catchup = w.getCurrentCatchupMult().toFixed(2);
 
     this.lblStats.string = [
-      `时间: ${w.elapsed.toFixed(1)}s  |  波次: ${wave}/20`,
-      `等级: Lv.${w.battleLevel} (${w.battleExp.toFixed(1)}/${w.expNeeded}) 下一级目标:${nextTarget ?? '-'}s`,
+      `时间: ${w.elapsed.toFixed(1)}s | 波次: ${wave}/20 (${w.waveDirector.currentWaveKind})`,
+      `等级: Lv.${w.battleLevel} (${w.battleExp.toFixed(1)}/${w.expNeeded}) 追赶:x${catchup} 下行:${w.waveDirector.downwardAssistTriggers}`,
       `最近升级: ${lvDiffStr}`,
-      `敌人: ${w.monsters.length}  |  武将: ${w.deployedHeroes.size}  |  援军: ${w.allyGuards.length}`,
-      `城墙: ${w.wallHp}/${w.maxWallHp} (${hpPct}%)  |  绝境:${w.crisisTriggered ? '已触' : '未触'}`,
-      `连斩: x${w.combo.combo} (最高 x${w.combo.maxCombo})  |  击杀: ${w.kills}`,
-      `FPS: ${this.curFps}  |  倍速: x${w.userSpeed}`,
+      `击杀深度: 压力${pDepth}% / 释放${rDepth}% | 怪:${w.monsters.length} 将:${w.deployedHeroes.size}`,
+      `城墙: ${w.wallHp}/${w.maxWallHp} (${hpPct}%) | 绝境:${w.crisisTriggered ? '已触' : '未触'}`,
+      `连斩: x${w.combo.combo} (最高 x${w.combo.maxCombo}) | 击杀: ${w.kills}`,
+      `FPS: ${this.curFps} | 倍速: x${w.userSpeed}`,
     ].join('\n');
   }
 }

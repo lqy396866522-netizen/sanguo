@@ -145,6 +145,7 @@ export const HERO_ART_KEY_MAP: Record<string, string> = {
 
 export const MONSTER_ART_KEY_MAP: Record<string, string> = {
   M_INFANTRY: 'monster_yellow',
+  M_RABBLE: 'monster_yellow',
   M_RATTAN: 'monster_rattan',
   M_SHIELD: 'monster_shield',
   M_CAVALRY: 'monster_cavalry',

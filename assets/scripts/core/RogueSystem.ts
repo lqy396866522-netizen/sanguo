@@ -10,9 +10,13 @@ export interface RogueDrawContext {
   lordSkillLevels: Record<string, number>;
   heroSaves: Record<string, HeroSaveData>;
   wallHpRatio: number;
+  isChest?: boolean;
   excludeCardUids?: string[];
   rng?: () => number;
 }
+
+// 偏辅助/控制型武将（用于首发三选一保底至少 2 名输出型）
+const SUPPORT_HERO_IDS = new Set(['H09', 'H10']);
 
 interface WeightedEntry {
   card: RogueCard;
@@ -27,9 +31,10 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
 
   // 1. 新武将招募卡（名将唯一上阵：已上阵的不再作为NEW_HERO）
   const mustPickHero = ctx.deployedHeroIds.length === 0;
+  const isChest = !!ctx.isChest;
   if (ctx.deployedHeroIds.length < ctx.maxSlots) {
     const isEarlyGuarantee = ctx.battleLevel <= 3 && ctx.deployedHeroIds.length < 2;
-    const heroWeight = isEarlyGuarantee ? 280 : 120;
+    const heroWeight = isChest ? 230 : isEarlyGuarantee ? 280 : 120;
 
     for (const hero of HERO_CONFIGS) {
       const save = ctx.heroSaves[hero.id];
@@ -58,37 +63,40 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
     }
   }
 
-  // 若场上尚无任何武将且有可招募武将，强制只抽取新武将，保证开局必有武将守城
+  // 若场上尚无任何武将且有可招募武将，强制只抽取新武将，并保底至少 2 名输出型（§7.3）
   if (mustPickHero && pool.length > 0) {
     const result: RogueCard[] = [];
     const copy = [...pool];
+    const dpsOnly = copy.filter((e) => e.card.heroId && !SUPPORT_HERO_IDS.has(e.card.heroId));
+    const minDps = Math.min(2, dpsOnly.length);
+    for (let d = 0; d < minDps && result.length < 3; d++) {
+      const availDps = copy.filter((e) => e.card.heroId && !SUPPORT_HERO_IDS.has(e.card.heroId));
+      if (availDps.length === 0) break;
+      const picked = pickWeighted(availDps, rand);
+      result.push(picked.card);
+      const idx = copy.indexOf(picked);
+      if (idx >= 0) copy.splice(idx, 1);
+    }
     while (result.length < 3 && copy.length > 0) {
-      const total = copy.reduce((s, e) => s + e.weight, 0);
-      let r = rand() * total;
-      let idx = 0;
-      for (let i = 0; i < copy.length; i++) {
-        r -= copy[i].weight;
-        if (r <= 0) {
-          idx = i;
-          break;
-        }
-      }
-      result.push(copy[idx].card);
-      copy.splice(idx, 1);
+      const picked = pickWeighted(copy, rand);
+      result.push(picked.card);
+      const idx = copy.indexOf(picked);
+      if (idx >= 0) copy.splice(idx, 1);
     }
     return result;
   }
 
   // 2. 主公连弩强化卡
+  const HIGH_VALUE_LORD_SKILLS = new Set(['LS_MULTI', 'LS_SPEED', 'LS_CRIT', 'LS_PIERCE']);
   for (const ls of LORD_SKILLS) {
     const curLv = ctx.lordSkillLevels[ls.id] || 0;
     if (curLv >= ls.maxLevel) continue;
     const uid = `LORD_${ls.id}`;
     if (excludeSet.has(uid)) continue;
 
-    let weight = 95;
+    let weight = isChest ? (HIGH_VALUE_LORD_SKILLS.has(ls.id) ? 165 : 65) : 95;
     if (ls.id === 'LS_WALL') {
-      weight = ctx.wallHpRatio < 0.8 ? 145 : 35;
+      weight = isChest ? (ctx.wallHpRatio < 0.5 ? 120 : 15) : ctx.wallHpRatio < 0.8 ? 145 : 35;
     }
 
     pool.push({
@@ -130,8 +138,11 @@ export function drawThreeRogueCards(ctx: RogueDrawContext): RogueCard[] {
       if (af.isSuperWeapon) tags.push('无双');
       else tags.push(`阶${curStack + 1}`);
 
+      const affixWeight = isChest
+        ? (af.isSuperWeapon ? 260 : curStack >= 1 ? 200 : 170)
+        : (af.isSuperWeapon ? 90 : 135);
       pool.push({
-        weight: af.isSuperWeapon ? 90 : 135,
+        weight: affixWeight,
         card: {
           uid,
           type: 'HERO_AFFIX',

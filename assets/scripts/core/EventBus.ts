@@ -1,4 +1,4 @@
-import type { EnemyRoleType, WaveNodeIcon } from './RunConfig.ts';
+import type { EnemyRoleType, WaveBannerTone, WaveKind, WaveNodeIcon } from './RunConfig.ts';
 
 export interface BattleEventMap {
   enemy_killed: {
@@ -24,9 +24,11 @@ export interface BattleEventMap {
   wave_started: {
     waveIndex: number;
     totalWaves: number;
+    waveKind: WaveKind;
     isNodeWave: boolean;
     isMilestone: boolean;
     banner?: string;
+    bannerTone?: WaveBannerTone;
     icon?: WaveNodeIcon;
     isBoss: boolean;
   };

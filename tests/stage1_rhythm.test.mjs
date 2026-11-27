@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { BattleWorld, FIXED_DT } from '../assets/scripts/core/BattleWorld.ts';
-import { RUN_CONFIG, SLOTS } from '../assets/scripts/core/RunConfig.ts';
+import { getCatchupExpMult, getWaveHpScale, RUN_CONFIG, SLOTS } from '../assets/scripts/core/RunConfig.ts';
 import { drawThreeRogueCards } from '../assets/scripts/core/RogueSystem.ts';
 import { calculateDamage } from '../assets/scripts/core/DamageCalc.ts';
 import { MONSTER_CONFIGS } from '../assets/scripts/core/configs.ts';
@@ -155,43 +155,67 @@ test('S1-5. 连斩Combo 2s超时归零与 10/25/50/100 里程碑称号', () => {
   assert.equal(combo.maxCombo, 100, '最高连斩应保留');
 });
 
-test('S1-6. 怪物数量×3(精英与Boss保持原数)、单怪经验1/3精准升级与6x倍速', () => {
-  assert.equal(RUN_CONFIG.monsterSwarmMult, 3, '怪物数量倍率应为3');
-  assert.ok(Math.abs(RUN_CONFIG.monsterExpScale - 1 / 3) < 1e-9, '单怪经验倍率应为1/3');
+test('S1-6. 指数血量缩放、杂兵无护体、入口冲锋护体25%渐退与6x倍速', () => {
+  assert.ok(RUN_CONFIG.hpMulBase > 1.05, '指数血量底数应大于 1.05');
+  assert.ok(getWaveHpScale(20) > getWaveHpScale(10) && getWaveHpScale(10) > getWaveHpScale(1), '波次血量应呈指数递增');
+  assert.ok(MONSTER_CONFIGS.M_RABBLE, '应定义释放波溃兵 M_RABBLE');
 
   const mgr = new PlayerDataManager(new MemRepo());
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 99 });
   world.selectRogueCard(0);
   world.autoPlacePendingHero();
 
-  // 校验总刷怪数：普通怪与盾/骑/医×3，精英与Boss保持原数
+  // 校验 WaveDirector 总刷怪数与 20 波表精确一致
   let expectedTotal = 0;
   for (const w of RUN_CONFIG.waves) {
-    expectedTotal += w.count * 3;
+    expectedTotal += w.count;
     if (w.special) {
-      for (const sp of w.special) {
-        expectedTotal += sp.type === 'boss' || sp.type === 'elite' ? sp.count : sp.count * 3;
-      }
+      for (const sp of w.special) expectedTotal += sp.count;
     }
   }
   assert.equal(world.waveDirector.totalSpawnCount, expectedTotal, 'WaveDirector 总刷怪数应精确匹配');
 
-  // 校验单怪经验 1/3：击杀 12 只普通小兵（12 * 1/3 = 4）应刚好升至 Lv.2
-  const expNeededLv1 = world.expNeeded;
-  assert.equal(expNeededLv1, 4);
-  for (let i = 0; i < 12; i++) {
-    const m = world.spawnMonster('M_INFANTRY', 0, 1, { x: 300, y: 900 }, false);
-    assert.ok(m);
-    m.hp = 0;
-  }
-  world.fixedTick(FIXED_DT);
-  assert.equal(world.battleLevel, 2, '击杀12只普通怪应精确获得4点经验并升至Lv.2');
+  // 校验入口护体标记：普通怪有护体，释放波杂兵无护体
+  const normalMob = world.spawnMonster('M_INFANTRY', 0, 1, { x: 300, y: 900 }, false);
+  const rabbleMob = world.spawnMonster('M_RABBLE', 0, 1, { x: 300, y: 900 }, false);
+  assert.equal(normalMob.hasEntryShield, true, '普通怪应带入口冲锋护体');
+  assert.equal(rabbleMob.hasEntryShield, false, '杂兵不应带入口护体以保持割草爽感');
+
+  // 校验追赶经验只加不减
+  assert.equal(getCatchupExpMult(100, 12), 1.0, '领先等级不应降倍率');
+  assert.equal(getCatchupExpMult(100, 10), 1.2, '落后1级应触发1.2x追赶');
+  assert.equal(getCatchupExpMult(100, 9), 1.5, '落后2级应触发1.5x追赶');
+  assert.equal(getCatchupExpMult(100, 7), 2.0, '落后3级及以上应触发2.0x追赶');
 
   // 校验 6x 倍速推进
-  world.selectRogueCard(0);
-  if (world.phase === 'DEPLOY_PICK') world.autoPlacePendingHero();
   world.setUserSpeed(6.0);
   const t0 = world.elapsed;
   world.step(0.1); // 0.1s * 6 = 0.6s 逻辑时间
   assert.ok(world.elapsed - t0 >= 0.55, `6x倍速下0.1s应至少推进0.55s逻辑时间，实际推进 ${(world.elapsed - t0).toFixed(3)}s`);
+});
+
+test('S1-7. Boss 三阶段（70%护盾+召兵+AOE免疫 / 35%狂暴）与首发输出保底', () => {
+  const mgr = new PlayerDataManager(new MemRepo());
+  const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 123 });
+  world.selectRogueCard(0);
+  world.autoPlacePendingHero();
+
+  const boss = world.spawnMonster('BOSS_ZHANGBO', 0, 1, { x: 375, y: 700 }, false, { waveId: 20, waveKind: 'boss', overrideMaxHp: 10000 });
+  assert.ok(boss);
+  assert.equal(boss.bossPhase, 1);
+
+  // 压至 65% 触发二阶段：5% 护盾 + 0.5s AOE免疫 + 召唤小兵潮
+  const beforeCount = world.monsters.length;
+  boss.hp = 6500;
+  world.fixedTick(FIXED_DT);
+  assert.equal(boss.bossPhase, 2, 'Boss <=70% 血量应进入二阶段');
+  assert.ok(boss.shieldHp > 0 && boss.maxShieldHp === 500, '二阶段应生成 5% 最大血量护盾');
+  assert.ok(boss.aoeImmuneTimer > 0, '二阶段应触发 0.5s AOE 免疫');
+  assert.ok(world.monsters.length >= beforeCount + RUN_CONFIG.boss.phase2SummonCount, '二阶段应召唤小兵潮');
+
+  // 压至 30% 触发三阶段狂暴
+  boss.hp = 3000;
+  world.fixedTick(FIXED_DT);
+  assert.equal(boss.bossPhase, 3, 'Boss <=35% 血量应进入三阶段狂暴');
+  assert.equal(boss.enraged, true, '三阶段 Boss 应处于狂暴状态');
 });

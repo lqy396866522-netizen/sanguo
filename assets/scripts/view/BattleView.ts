@@ -316,7 +316,7 @@ export class BattleView {
         }
         ScreenShake.play(8, 0.4);
       }
-      this.showWaveAnnouncement(e.waveIndex, e.banner, e.isBoss);
+      this.showWaveAnnouncement(e.waveIndex, e.banner, e.isBoss, e.bannerTone);
     });
 
     ev.on('enemy_damaged', (e) => {
@@ -1006,14 +1006,27 @@ export class BattleView {
       }
 
       const key = MONSTER_ART_KEY_MAP[m.config.id];
+      const isRabble = m.config.roleType === 'rabble';
       let entry = this.monsterSpriteMap.get(m.uid);
       if (!entry && key && ArtAssetManager.has(key)) {
-        const size = m.config.isBoss ? 110 : 60;
+        const size = m.config.isBoss ? 110 : isRabble ? 48 : 60;
         const node = this.acquireSprite(key, size, size);
         if (node) {
           attachHitFlash(node);
           entry = { node, key, prevHitTimer: 0 };
           this.monsterSpriteMap.set(m.uid, entry);
+        }
+      }
+
+      // 入口冲锋护体（§6.2）：前 25% 路径脚下浅蓝护盾圈随深度渐隐（杂兵无护体）
+      if (m.hasEntryShield && !m.isTargetDummy && m.pathTotalLen > 0) {
+        const depth = m.pathTraveled / m.pathTotalLen;
+        if (depth < RUN_CONFIG.entryShieldDistRatio) {
+          const shieldAlpha = Math.max(25, Math.round(170 * (1 - depth / RUN_CONFIG.entryShieldDistRatio)));
+          g.strokeColor = hexToColor('#80D8FF', shieldAlpha);
+          g.lineWidth = 2.5;
+          g.circle(mx, my, r + 5);
+          g.stroke();
         }
       }
 
@@ -1026,7 +1039,15 @@ export class BattleView {
         }
         entry.prevHitTimer = m.hitFlashTimer;
         const sp = entry.node.getComponent(Sprite);
-        if (sp) sp.color = hit ? COLOR_HIT : m.freezeTimer > 0 ? COLOR_FREEZE : COLOR_WHITE;
+        if (sp) {
+          sp.color = hit
+            ? COLOR_HIT
+            : m.freezeTimer > 0
+              ? COLOR_FREEZE
+              : isRabble
+                ? new Color(220, 210, 185, 235)
+                : COLOR_WHITE;
+        }
       } else {
         g.fillColor = hexToColor(m.hitFlashTimer > 0 ? '#FFFFFF' : m.freezeTimer > 0 ? '#80D8FF' : m.config.colorHex, 255);
         g.circle(mx, my, r);
@@ -1038,7 +1059,7 @@ export class BattleView {
       }
 
       if (m.config.isBoss) {
-        g.strokeColor = hexToColor('#FFD54F', 255);
+        g.strokeColor = hexToColor(m.bossPhase === 3 ? '#FF1744' : '#FFD54F', 255);
         g.lineWidth = 3;
         g.circle(mx, my, r + 4);
         g.stroke();
@@ -1054,7 +1075,7 @@ export class BattleView {
         g.fill();
       }
 
-      const bw = m.config.isBoss ? 86 : 40;
+      const bw = m.config.isBoss ? 86 : isRabble ? 30 : 40;
       const ratio = Math.max(0, m.hp / m.maxHp);
       const barY = my + r + (m.config.isBoss ? 18 : 8);
       g.fillColor = hexToColor('#111111', 200);
@@ -1063,6 +1084,12 @@ export class BattleView {
       g.fillColor = hexToColor(m.config.isBoss ? '#FF1744' : ratio > 0.5 ? '#66BB6A' : '#FFCA28', 255);
       g.rect(mx - bw / 2, barY, bw * ratio, 6);
       g.fill();
+      if (m.shieldHp > 0 && m.maxShieldHp > 0) {
+        const sRatio = Math.max(0, Math.min(1, m.shieldHp / m.maxShieldHp));
+        g.fillColor = hexToColor('#40C4FF', 240);
+        g.rect(mx - bw / 2, barY + 7, bw * sRatio, 4);
+        g.fill();
+      }
     }
 
     for (const [uid, entry] of this.monsterSpriteMap.entries()) {
@@ -1317,17 +1344,25 @@ export class BattleView {
     }
   }
 
-  // 分级波次预告：节点波 2.0s 大横幅；普通波 0.8s 淡入淡出小字
-  private showWaveAnnouncement(waveIndex: number, bannerText?: string, isBoss = false): void {
+  // 分级波次预告：节点波 2.0s 大横幅（释放波用金/绿正面色）；普通波 0.8s 淡入淡出小字
+  private showWaveAnnouncement(
+    waveIndex: number,
+    bannerText?: string,
+    isBoss = false,
+    bannerTone: 'positive' | 'warning' = 'warning'
+  ): void {
     if (waveIndex <= this.lastWaveShown) return;
     this.lastWaveShown = waveIndex;
 
     if (bannerText || isBoss) {
       const banner = createUINode('WaveBanner', 750, 96, this.modalLayer, -760, 220);
-      const bg = isBoss ? '#B71C1C' : '#1A1426';
-      drawRoundedBox(banner, 750, 96, bg, 230, 0, isBoss ? '#FF5252' : '#FFD54F', 2.5);
+      const isPositive = !isBoss && bannerTone === 'positive';
+      const bg = isBoss ? '#B71C1C' : isPositive ? '#1B3A24' : '#1A1426';
+      const border = isBoss ? '#FF5252' : isPositive ? '#69F0AE' : '#FFD54F';
+      const textColor = isBoss ? '#FFCDD2' : isPositive ? '#FFE57F' : '#FFD54F';
+      drawRoundedBox(banner, 750, 96, bg, 232, 0, border, 2.5);
       const title = `第${waveIndex}波 · ${bannerText || 'Boss 来袭'}`;
-      createLabel(banner, title, isBoss ? 40 : 36, isBoss ? '#FFCDD2' : '#FFD54F', 0, 2, 680, 54, true);
+      createLabel(banner, title, isBoss ? 40 : 36, textColor, 0, 2, 680, 54, true);
       tween(banner)
         .to(0.28, { position: new Vec3(0, 220, 0) }, { easing: 'backOut' })
         .delay(1.45)
