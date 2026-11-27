@@ -43,6 +43,7 @@ import {
   drawRedVipCard,
   drawRoundedBox,
   drawWoodCard,
+  getScreenLayout,
   hexToColor,
   playBurstParticles,
   playChestOpen,
@@ -184,36 +185,54 @@ export class GameApp extends Component {
   }
 
   private renderShop(renderTabs: (a: TabKey) => void): void {
-    const bg = createUINode('ShopBg', 750, 1750, this.viewRoot, 0, 0);
-    drawRoundedBox(bg, 750, 1750, '#2B1814', 255, 0);
+    const layout = getScreenLayout();
+    const bgH = Math.max(1850, layout.visH + 100);
+    const bg = createUINode('ShopBg', 750, bgH, this.viewRoot, 0, 0);
+    drawRoundedBox(bg, 750, bgH, '#2B1814', 255, 0);
     const shopBgKey = ArtAssetManager.has('bg_shop') ? 'bg_shop' : 'bg_hall';
-    ArtAssetManager.createSpriteNode(bg, shopBgKey, 980, 1750, 0, 0);
-    attachBgMotes(bg, 7, 640, 1000, '#FFD9A0');
+    ArtAssetManager.createSpriteNode(bg, shopBgKey, 980, bgH, 0, 0);
+    attachBgMotes(bg, 7, 640, layout.visH - 200, '#FFD9A0');
 
     const p = this.dataMgr.profile;
-    // ---- 顶部飞檐木匾标题栏 ----
+    const prods = this.shopService.getProducts();
+    // 动态纵向布局：顶部标题 + 货币栏 + 每日宝箱 + 5个商品 + 分割条 + 3个VIP礼包，上下占满屏幕不留空
+    const headerH = 120;
+    const currH = 54;
+    const divH = 42;
+    const gap = 10;
+    const totalCards = 1 + DAILY_SHOP_ITEMS.length + prods.length;
+    const availForCards = layout.contentH - headerH - currH - divH - gap * (totalCards + 3);
+    const cardH = Math.max(76, Math.min(118, Math.floor(availForCards / totalCards)));
+    const vipCardH = Math.min(126, cardH + 6);
+    const btnW = 172;
+    const btnH = Math.max(52, Math.min(64, cardH - 22));
+
+    let curY = layout.contentTop - headerH / 2;
+    // ---- 顶部飞檐木匾标题栏（紧贴顶部） ----
     if (ArtAssetManager.has('ui_banner_eave')) {
-      ArtAssetManager.createSpriteNode(bg, 'ui_banner_eave', 660, 138, 0, 548);
-      createLabel(bg, '军需商店 · 每日补给', 28, '#FFE8A3', 0, 526, 420, 38, true);
+      ArtAssetManager.createSpriteNode(bg, 'ui_banner_eave', 700, headerH + 14, 0, curY + 4);
+      createLabel(bg, '军需商店 · 每日补给', 34, '#FFE8A3', 0, curY - 14, 480, 44, true);
     } else {
-      const top = createUINode('ShopTop', 706, 86, bg, 0, 542);
-      drawCloudPanel(top, 706, 86, '#3B2219', '#E5B454', 16);
-      createLabel(top, '军需商店 · 每日补给', 28, '#FFE8A3', 0, 0, 520, 38, true);
+      const top = createUINode('ShopTop', 718, headerH - 12, bg, 0, curY);
+      drawCloudPanel(top, 718, headerH - 12, '#3B2219', '#E5B454', 18);
+      createLabel(top, '军需商店 · 每日补给', 34, '#FFE8A3', 0, 0, 560, 44, true);
     }
 
     // ---- 3 枚独立圆角胶囊货币槽（元宝 / 铜钱 / 粮草） ----
-    const caps = createUINode('CurrencyBar', 680, 44, bg, 0, 456);
+    curY -= headerH / 2 + gap + currH / 2;
+    const currBarY = curY;
+    const caps = createUINode('CurrencyBar', 716, currH, bg, 0, currBarY);
     const capSpecs = [
-      { x: -216, icon: ArtAssetManager.has('icon_ingot') ? 'icon_ingot' : 'icon_diamond', prefix: '元宝 ', val: p.diamond, suffix: '', col: '#FFE082' },
+      { x: -236, icon: ArtAssetManager.has('icon_ingot') ? 'icon_ingot' : 'icon_diamond', prefix: '元宝 ', val: p.diamond, suffix: '', col: '#FFE082' },
       { x: 0, icon: ArtAssetManager.has('icon_coin_s') ? 'icon_coin_s' : 'icon_gold', prefix: '铜钱 ', val: p.gold, suffix: '', col: '#FFD54F' },
-      { x: 216, icon: ArtAssetManager.has('icon_stamina_bag') ? 'icon_stamina_bag' : 'icon_stamina', prefix: '粮草 ', val: p.stamina, suffix: `/${p.maxStamina}`, col: '#A5D6A7' },
+      { x: 236, icon: ArtAssetManager.has('icon_stamina_bag') ? 'icon_stamina_bag' : 'icon_stamina', prefix: '粮草 ', val: p.stamina, suffix: `/${p.maxStamina}`, col: '#A5D6A7' },
     ];
     const rollFns: (() => void)[] = [];
     capSpecs.forEach((c) => {
-      const pill = createUINode('CapPill', 202, 40, caps, c.x, 0);
-      drawRoundedBox(pill, 202, 40, '#1D120E', 225, 20, '#C89B42', 1.5);
-      ArtAssetManager.createSpriteNode(pill, c.icon, 28, 28, -70, 0);
-      const lbl = createLabel(pill, `${c.prefix}${c.val}${c.suffix}`, 18, c.col, 14, 0, 138, 26, true);
+      const pill = createUINode('CapPill', 224, currH - 2, caps, c.x, 0);
+      drawRoundedBox(pill, 224, currH - 2, '#1D120E', 230, 24, '#C89B42', 2);
+      ArtAssetManager.createSpriteNode(pill, c.icon, 34, 34, -80, 0);
+      const lbl = createLabel(pill, `${c.prefix}${c.val}${c.suffix}`, 22, c.col, 18, 0, 154, 32, true);
       const nr = attachNumberRoll(lbl.node, c.val, { prefix: c.prefix, suffix: c.suffix, tintOnIncrease: true });
       rollFns.push(() => {
         const cur = c.prefix.startsWith('元宝') ? p.diamond : c.prefix.startsWith('铜钱') ? p.gold : p.stamina;
@@ -223,23 +242,25 @@ export class GameApp extends Component {
     const rollResources = () => rollFns.forEach((fn) => fn());
 
     // ---- 每日军需宝箱（暖棕木纹卡 + 黄金宝箱） ----
+    curY -= currH / 2 + gap + cardH / 2;
+    const freeCardY = curY;
     const chestLeft = this.dataMgr.adLeft('shop_free_chest');
     const canClaim = chestLeft > 0;
-    const freeCard = createUINode('FreeChest', 708, 72, bg, 0, 392);
-    drawWoodCard(freeCard, 708, 72, !canClaim);
-    if (canClaim) attachGlowPulse(freeCard, 96, '#FFD54F', -296, 0, true, { minOpacity: 90, maxOpacity: 230, scaleAmp: 0.14 });
+    const freeCard = createUINode('FreeChest', 722, cardH, bg, 0, freeCardY);
+    drawWoodCard(freeCard, 722, cardH, !canClaim);
+    if (canClaim) attachGlowPulse(freeCard, 108, '#FFD54F', -302, 0, true, { minOpacity: 90, maxOpacity: 230, scaleAmp: 0.14 });
     const chestKey = ArtAssetManager.has('icon_chest_gold') ? 'icon_chest_gold' : 'icon_chest';
-    const freeChestSp = ArtAssetManager.createSpriteNode(freeCard, chestKey, 54, 54, -296, 0);
+    const freeChestSp = ArtAssetManager.createSpriteNode(freeCard, chestKey, 64, 64, -302, 0);
     if (freeChestSp) {
       if (canClaim) attachIdleBreath(freeChestSp, { mode: BreathMode.Float, amp: 5, period: 1.3 });
       else setIconGray(freeChestSp, true);
     }
-    const lblF1 = createLabel(freeCard, '每日军需宝箱 · 铜钱×500 锻造石×5', 19, canClaim ? '#FFF3D6' : '#A1887F', -56, 13, 400, 28, true);
+    const lblF1 = createLabel(freeCard, '每日军需宝箱 · 铜钱×500 锻造石×5', 23, canClaim ? '#FFF3D6' : '#A1887F', -54, 16, 410, 32, true);
     lblF1.horizontalAlign = Label.HorizontalAlign.LEFT;
-    const lblF2 = createLabel(freeCard, `每日免费观看激励视频领取 (${chestLeft}/1)`, 15, canClaim ? '#D7CCC8' : '#8D6E63', -56, -15, 400, 24, true);
+    const lblF2 = createLabel(freeCard, `每日免费观看激励视频领取 (${chestLeft}/1)`, 19, canClaim ? '#D7CCC8' : '#8D6E63', -54, -18, 410, 28, true);
     lblF2.horizontalAlign = Label.HorizontalAlign.LEFT;
     let claiming = false;
-    const chestBtn = createButton(freeCard, canClaim ? '免费领' : '已领取', 142, 48, canClaim ? '#2E7D32' : '#546E7A', async () => {
+    const chestBtn = createButton(freeCard, canClaim ? '免费领' : '已领取', btnW, btnH, canClaim ? '#2E7D32' : '#546E7A', async () => {
       if (claiming) return;
       if (!canClaim) {
         playShakeDeny(chestBtn.node);
@@ -258,10 +279,10 @@ export class GameApp extends Component {
       this.dataMgr.profile.forgeStone += 5;
       this.dataMgr.save();
       AudioManager.playSfx('sfx_coin');
-      const chestPos = new Vec3(-296, 392, 0);
+      const chestPos = new Vec3(-302, freeCardY, 0);
       const onOpen = () => {
-        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, 456, 0), 5, 'icon_coin_s', '#FFD54F', rollResources);
-        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, 456, 0), 3, 'icon_forge_ore', '#FF7043');
+        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, currBarY, 0), 5, 'icon_coin_s', '#FFD54F', rollResources);
+        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, currBarY, 0), 3, 'icon_forge_ore', '#FF7043');
         FloatText.show(this.viewRoot, freeCard.worldPosition, '+500铜钱 +5锻造石', FloatStyle.gold);
         chestBtn.label.string = '已领取';
         showToast(this.viewRoot, '获得 铜钱×500 锻造石×5');
@@ -269,8 +290,8 @@ export class GameApp extends Component {
       };
       if (freeChestSp) playChestOpen(freeChestSp, this.viewRoot, chestPos, onOpen);
       else onOpen();
-    }, 260, 0, 19);
-    if (canClaim) attachShineSweep(chestBtn.node, 142, 48, { loop: true, interval: 2.6 });
+    }, 256, 0, 23);
+    if (canClaim) attachShineSweep(chestBtn.node, btnW, btnH, { loop: true, interval: 2.6 });
 
     // ---- 日常军需货架（暖棕木纹卡 + 立体图标 + 嵌币价格按钮） ----
     const iconByItem: Record<string, string> = {
@@ -284,29 +305,30 @@ export class GameApp extends Component {
     const ingotMiniKey = ArtAssetManager.has('icon_ingot') ? 'icon_ingot' : 'icon_diamond';
 
     DAILY_SHOP_ITEMS.forEach((item, idx) => {
+      curY -= cardH + gap;
+      const y = curY;
       const left = this.dataMgr.shopLeft(item.id);
-      const y = 312 - idx * 76;
       const unit = item.currency === 'gold' ? '铜钱' : '元宝';
-      const card = createUINode(`ShopItem_${idx}`, 708, 66, bg, 0, y);
-      drawWoodCard(card, 708, 66, left <= 0);
-      const itemSp = ArtAssetManager.createSpriteNode(card, iconByItem[item.id] || coinMiniKey, 50, 50, -296, 0);
+      const card = createUINode(`ShopItem_${idx}`, 722, cardH, bg, 0, y);
+      drawWoodCard(card, 722, cardH, left <= 0);
+      const itemSp = ArtAssetManager.createSpriteNode(card, iconByItem[item.id] || coinMiniKey, 60, 60, -302, 0);
       if (itemSp) {
         if (left > 0) attachIdleBreath(itemSp, { mode: BreathMode.Scale, amp: 0.04, period: 1.4, randomDelay: 1.6 });
         else setIconGray(itemSp, true);
       }
-      const nameLbl = createLabel(card, `${item.name}  [今日剩${left}/${item.dailyLimit}]`, 19, left > 0 ? '#FFE8A3' : '#A1887F', -56, 12, 400, 26, true);
+      const nameLbl = createLabel(card, `${item.name}  [今日剩${left}/${item.dailyLimit}]`, 23, left > 0 ? '#FFE8A3' : '#A1887F', -54, 16, 410, 32, true);
       nameLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
       const nrLeft = attachNumberRoll(nameLbl.node, left, { prefix: `${item.name}  [今日剩`, suffix: `/${item.dailyLimit}]`, duration: 0.35 });
       nrLeft.setNow(left);
-      const descLbl = createLabel(card, item.desc, 15, left > 0 ? '#E8D5C4' : '#8D6E63', -56, -14, 400, 22, true);
+      const descLbl = createLabel(card, item.desc, 19, left > 0 ? '#E8D5C4' : '#8D6E63', -54, -18, 410, 28, true);
       descLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
       const isGoldBtn = left > 0 && item.currency === 'gold';
       const btnColor = left > 0 ? (item.currency === 'gold' ? '#FFB300' : '#1565C0') : '#546E7A';
       const buyBtn = createButton(
         card,
         left > 0 ? `${item.price}${unit}` : '已售罄',
-        148,
-        46,
+        btnW,
+        btnH,
         btnColor,
         () => {
           const r = this.dataMgr.buyShopItem(item.id);
@@ -328,63 +350,65 @@ export class GameApp extends Component {
         },
         256,
         0,
-        17,
+        22,
         '#FFE082',
         isGoldBtn ? '#1A1426' : '#FFFFFF'
       );
       if (left > 0) {
         const curKey = item.currency === 'gold' ? coinMiniKey : ingotMiniKey;
-        ArtAssetManager.createSpriteNode(buyBtn.node, curKey, 22, 22, -46, 0);
-        buyBtn.label.node.setPosition(14, 0, 0);
-        buyBtn.label.fontSize = 16;
-        attachShineSweep(buyBtn.node, 148, 46, { loop: true, interval: 3.2, randomDelay: 1.5 });
+        ArtAssetManager.createSpriteNode(buyBtn.node, curKey, 26, 26, -54, 0);
+        buyBtn.label.node.setPosition(16, 0, 0);
+        buyBtn.label.fontSize = 21;
+        attachShineSweep(buyBtn.node, btnW, btnH, { loop: true, interval: 3.2, randomDelay: 1.5 });
       }
     });
 
     // ---- 尊享特权与超值礼包分割条 ----
-    const divNode = createUINode('VipDivider', 680, 32, bg, 0, -52);
+    curY -= cardH / 2 + gap + divH / 2;
+    const divNode = createUINode('VipDivider', 700, divH, bg, 0, curY);
     const dg = divNode.getComponent(Graphics) || divNode.addComponent(Graphics);
     dg.strokeColor = hexToColor('#C89B42', 220);
     dg.lineWidth = 2;
-    dg.moveTo(-320, 0);
-    dg.lineTo(-140, 0);
-    dg.moveTo(140, 0);
-    dg.lineTo(320, 0);
+    dg.moveTo(-330, 0);
+    dg.lineTo(-160, 0);
+    dg.moveTo(160, 0);
+    dg.lineTo(330, 0);
     dg.stroke();
-    createLabel(divNode, '尊享特权与超值礼包', 22, '#FFE8A3', 0, 0, 260, 30, true);
+    createLabel(divNode, '尊享特权与超值礼包', 26, '#FFE8A3', 0, 0, 310, 34, true);
 
     const vipIcons = [
       ArtAssetManager.has('icon_ingot_tray') ? 'icon_ingot_tray' : 'icon_diamond',
       ArtAssetManager.has('icon_crossbow_gift') ? 'icon_crossbow_gift' : 'icon_weapon',
       ArtAssetManager.has('icon_treasure_pile') ? 'icon_treasure_pile' : chestKey,
     ];
-    this.shopService.getProducts().forEach((prod, i) => {
-      const y = -124 - i * 88;
-      const card = createUINode(`Prod_${prod.id}`, 708, 76, bg, 0, y);
-      drawRedVipCard(card, 708, 76);
-      if (i === 0) attachSpinLoop(card, 92, 18, '#FFD54F', -296, 0, true);
+    curY -= divH / 2 + gap + vipCardH / 2;
+    prods.forEach((prod, i) => {
+      const y = curY - i * (vipCardH + gap);
+      const card = createUINode(`Prod_${prod.id}`, 722, vipCardH, bg, 0, y);
+      drawRedVipCard(card, 722, vipCardH);
+      if (i === 0) attachSpinLoop(card, 102, 18, '#FFD54F', -302, 0, true);
       if (i === 2) {
-        attachOrbitCoins(card, -296, 0, 34, 6, -45);
-        attachGlowPulse(card, 84, '#FFD54F', -296, 0, true, { minOpacity: 70, maxOpacity: 200, scaleAmp: 0.12 });
+        attachOrbitCoins(card, -302, 0, 38, 6, -45);
+        attachGlowPulse(card, 92, '#FFD54F', -302, 0, true, { minOpacity: 70, maxOpacity: 200, scaleAmp: 0.12 });
       }
-      const pSp = ArtAssetManager.createSpriteNode(card, vipIcons[i] || 'icon_diamond', 54, 54, -296, 0);
-      if (pSp && i === 0) attachShineSweep(pSp, 54, 54, { loop: true, interval: 3, duration: 0.7 });
+      const pSp = ArtAssetManager.createSpriteNode(card, vipIcons[i] || 'icon_diamond', 64, 64, -302, 0);
+      if (pSp && i === 0) attachShineSweep(pSp, 64, 64, { loop: true, interval: 3, duration: 0.7 });
       if (pSp && i === 2) attachIdleBreath(pSp, { mode: BreathMode.Float, amp: 5, period: 1.5 });
-      const vipName = createLabel(card, prod.name, 22, '#FFE8A3', -56, 15, 400, 28, true);
+      const vipName = createLabel(card, prod.name, 25, '#FFE8A3', -54, 18, 410, 34, true);
       vipName.horizontalAlign = Label.HorizontalAlign.LEFT;
-      const vipDesc = createLabel(card, prod.desc, 16, '#F5D6CE', -56, -15, 400, 24, true);
+      const vipDesc = createLabel(card, prod.desc, 19, '#F5D6CE', -54, -18, 410, 28, true);
       vipDesc.horizontalAlign = Label.HorizontalAlign.LEFT;
-      const pBtn = createButton(card, `¥${prod.priceYuan}`, 142, 48, '#C62828', async () => {
+      const pBtn = createButton(card, `¥${prod.priceYuan}`, btnW, btnH, '#C62828', async () => {
         const r = await this.shopService.purchase(prod.id);
         showToast(this.viewRoot, r.msg);
-      }, 260, 0, 20);
-      attachShineSweep(pBtn.node, 142, 48, { loop: true, interval: i === 1 ? 2.5 : 2.8, randomDelay: 1.2 });
+      }, 256, 0, 25);
+      attachShineSweep(pBtn.node, btnW, btnH, { loop: true, interval: i === 1 ? 2.5 : 2.8, randomDelay: 1.2 });
       if (i === 1) {
         attachIdleBreath(pBtn.node, { mode: BreathMode.Scale, amp: 0.04, period: 1.3 });
         attachPeriodicWiggle(pBtn.node, 4, 3);
-        const hot = createUINode('HotTag', 48, 22, card, -76, 15);
-        drawRoundedBox(hot, 48, 22, '#FFB300', 255, 8, '#FFF8E1', 1);
-        createLabel(hot, '超值', 13, '#1A1426', 0, 0, 44, 18, true);
+        const hot = createUINode('HotTag', 58, 26, card, -70, 18);
+        drawRoundedBox(hot, 58, 26, '#FFB300', 255, 8, '#FFF8E1', 1);
+        createLabel(hot, '超值', 16, '#1A1426', 0, 0, 52, 22, true);
         attachIdleBreath(hot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3 });
       }
     });

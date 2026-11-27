@@ -154,3 +154,44 @@ test('S1-5. 连斩Combo 2s超时归零与 10/25/50/100 里程碑称号', () => {
   assert.equal(combo.combo, 0, '超过2s应归零');
   assert.equal(combo.maxCombo, 100, '最高连斩应保留');
 });
+
+test('S1-6. 怪物数量×3(精英与Boss保持原数)、单怪经验1/3精准升级与6x倍速', () => {
+  assert.equal(RUN_CONFIG.monsterSwarmMult, 3, '怪物数量倍率应为3');
+  assert.ok(Math.abs(RUN_CONFIG.monsterExpScale - 1 / 3) < 1e-9, '单怪经验倍率应为1/3');
+
+  const mgr = new PlayerDataManager(new MemRepo());
+  const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 99 });
+  world.selectRogueCard(0);
+  world.autoPlacePendingHero();
+
+  // 校验总刷怪数：普通怪与盾/骑/医×3，精英与Boss保持原数
+  let expectedTotal = 0;
+  for (const w of RUN_CONFIG.waves) {
+    expectedTotal += w.count * 3;
+    if (w.special) {
+      for (const sp of w.special) {
+        expectedTotal += sp.type === 'boss' || sp.type === 'elite' ? sp.count : sp.count * 3;
+      }
+    }
+  }
+  assert.equal(world.waveDirector.totalSpawnCount, expectedTotal, 'WaveDirector 总刷怪数应精确匹配');
+
+  // 校验单怪经验 1/3：击杀 12 只普通小兵（12 * 1/3 = 4）应刚好升至 Lv.2
+  const expNeededLv1 = world.expNeeded;
+  assert.equal(expNeededLv1, 4);
+  for (let i = 0; i < 12; i++) {
+    const m = world.spawnMonster('M_INFANTRY', 0, 1, { x: 300, y: 900 }, false);
+    assert.ok(m);
+    m.hp = 0;
+  }
+  world.fixedTick(FIXED_DT);
+  assert.equal(world.battleLevel, 2, '击杀12只普通怪应精确获得4点经验并升至Lv.2');
+
+  // 校验 6x 倍速推进
+  world.selectRogueCard(0);
+  if (world.phase === 'DEPLOY_PICK') world.autoPlacePendingHero();
+  world.setUserSpeed(6.0);
+  const t0 = world.elapsed;
+  world.step(0.1); // 0.1s * 6 = 0.6s 逻辑时间
+  assert.ok(world.elapsed - t0 >= 0.55, `6x倍速下0.1s应至少推进0.55s逻辑时间，实际推进 ${(world.elapsed - t0).toFixed(3)}s`);
+});

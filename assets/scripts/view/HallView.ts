@@ -19,6 +19,7 @@ import {
   drawCardPanel,
   drawLeftAlignedBar,
   drawRoundedBox,
+  getScreenLayout,
   playBattleTransition,
   playChestOpen,
   playFlyIcons,
@@ -100,37 +101,41 @@ export class HallView {
     const challengeUnlocked = this.dataMgr.isChallengeUnlocked(stage.stageId);
     if (this.challengeMode && !challengeUnlocked) this.challengeMode = false;
 
-    // 1. 商业化暗金三国沙盘全屏背景
-    const bg = createUINode('HallBg', 750, 1750, this.root, 0, 0);
-    drawRoundedBox(bg, 750, 1750, '#161218', 255, 0);
-    ArtAssetManager.createSpriteNode(bg, 'bg_hall', 750, 1340, 0, 0);
-    attachBgMotes(bg, 6, 640, 1000);
+    // 1. 商业化暗金三国沙盘全屏背景（动态铺满全屏，上下零留白）
+    const layout = getScreenLayout();
+    const bgH = Math.max(1850, layout.visH + 100);
+    const bg = createUINode('HallBg', 750, bgH, this.root, 0, 0);
+    drawRoundedBox(bg, 750, bgH, '#161218', 255, 0);
+    ArtAssetManager.createSpriteNode(bg, 'bg_hall', 980, bgH, 0, 0);
+    attachBgMotes(bg, 6, 640, layout.visH - 200);
 
-    // 2. 顶部资源状态栏（严格低于微信右上角胶囊 y<=580）
-    const topBar = createUINode('TopBar', 716, 102, this.root, 0, 535);
-    drawCardPanel(topBar, 716, 102, '#1A1524', '#C89B42', 14, 2);
+    // 2. 顶部资源状态栏（紧贴屏幕顶部）
+    const topBarH = 114;
+    const topBarY = layout.contentTop - topBarH / 2;
+    const topBar = createUINode('TopBar', 724, topBarH, this.root, 0, topBarY);
+    drawCardPanel(topBar, 724, topBarH, '#1A1524', '#C89B42', 14, 2);
 
-    const avatarBg = createUINode('LordAvatar', 74, 74, topBar, -304, 0);
-    drawRoundedBox(avatarBg, 74, 74, '#2A2036', 245, 14, '#FFD54F', 2);
-    ArtAssetManager.createSpriteNode(avatarBg, HERO_ART_KEY_MAP.LORD, 66, 66, 0, 0);
+    const avatarBg = createUINode('LordAvatar', 82, 82, topBar, -306, 0);
+    drawRoundedBox(avatarBg, 82, 82, '#2A2036', 245, 14, '#FFD54F', 2);
+    ArtAssetManager.createSpriteNode(avatarBg, HERO_ART_KEY_MAP.LORD, 72, 72, 0, 0);
 
-    createLabel(topBar, `${p.nickname} Lv.${p.level}`, 21, '#FFE082', -168, 20, 190, 28, true);
-    createLabel(topBar, `战力 ${this.dataMgr.getCombatPower()}`, 19, '#69F0AE', -168, -16, 180, 26, true);
+    createLabel(topBar, `${p.nickname} Lv.${p.level}`, 24, '#FFE082', -162, 22, 200, 32, true);
+    createLabel(topBar, `战力 ${this.dataMgr.getCombatPower()}`, 22, '#69F0AE', -162, -20, 190, 28, true);
 
-    ArtAssetManager.createSpriteNode(topBar, 'icon_diamond', 24, 24, -46, 20);
-    const lblDia = createLabel(topBar, `${p.diamond}`, 19, '#80D8FF', 6, 20, 82, 26, true);
+    ArtAssetManager.createSpriteNode(topBar, 'icon_diamond', 28, 28, -46, 22);
+    const lblDia = createLabel(topBar, `${p.diamond}`, 22, '#80D8FF', 8, 22, 84, 28, true);
     const nrDia = attachNumberRoll(lblDia.node, HallView.lastRes.diamond >= 0 ? HallView.lastRes.diamond : p.diamond, { tintOnIncrease: true });
     if (HallView.lastRes.diamond >= 0 && HallView.lastRes.diamond !== p.diamond) nrDia.rollTo(p.diamond);
     HallView.lastRes.diamond = p.diamond;
 
-    ArtAssetManager.createSpriteNode(topBar, 'icon_gold', 24, 24, 78, 20);
-    const lblGold = createLabel(topBar, `${p.gold}`, 19, '#FFE082', 136, 20, 96, 26, true);
+    ArtAssetManager.createSpriteNode(topBar, 'icon_gold', 28, 28, 80, 22);
+    const lblGold = createLabel(topBar, `${p.gold}`, 22, '#FFE082', 140, 22, 98, 28, true);
     const nrGold = attachNumberRoll(lblGold.node, HallView.lastRes.gold >= 0 ? HallView.lastRes.gold : p.gold, { tintOnIncrease: true });
     if (HallView.lastRes.gold >= 0 && HallView.lastRes.gold !== p.gold) nrGold.rollTo(p.gold);
     HallView.lastRes.gold = p.gold;
 
-    ArtAssetManager.createSpriteNode(topBar, 'icon_stamina', 24, 24, 212, 20);
-    const lblStam = createLabel(topBar, `${p.stamina}/${p.maxStamina}`, 19, '#AED581', 274, 20, 96, 26, true);
+    ArtAssetManager.createSpriteNode(topBar, 'icon_stamina', 28, 28, 214, 22);
+    const lblStam = createLabel(topBar, `${p.stamina}/${p.maxStamina}`, 22, '#AED581', 280, 22, 102, 28, true);
     const nrStam = attachNumberRoll(lblStam.node, HallView.lastRes.stamina >= 0 ? HallView.lastRes.stamina : p.stamina, { suffix: `/${p.maxStamina}`, tintOnIncrease: true });
     if (HallView.lastRes.stamina >= 0 && HallView.lastRes.stamina !== p.stamina) nrStam.rollTo(p.stamina);
     HallView.lastRes.stamina = p.stamina;
@@ -139,7 +144,7 @@ export class HallView {
     const adStamBtn = createButton(
       topBar,
       `+15粮(广${adStamLeft})`,
-      152, 34,
+      174, 42,
       adStamLeft > 0 ? '#2E7D32' : '#546E7A',
       async () => {
         if (this.dataMgr.adLeft('daily_stamina') <= 0) return showToast(this.root, '今日广告领粮次数已用完');
@@ -150,115 +155,122 @@ export class HallView {
           this.render();
         }
       },
-      244, -22, 14
+      250, -24, 18
     );
-    if (adStamLeft > 0) addShimmerEffect(adStamBtn.node, 152, 34);
+    if (adStamLeft > 0) addShimmerEffect(adStamBtn.node, 174, 42);
     const s = this.dataMgr.getNextStaminaRecoverSec();
     const initTimer = s <= 0 ? '粮草已满' : `回粮 ${Math.floor(s / 60)}:${s % 60 < 10 ? '0' : ''}${s % 60}`;
-    this.staminaTimerLabel = createLabel(topBar, initTimer, 16, '#B0BEC5', 42, -22, 160, 24, true);
+    this.staminaTimerLabel = createLabel(topBar, initTimer, 19, '#B0BEC5', 34, -24, 180, 26, true);
 
-    // 3. 关卡大标题（切关时滑入淡入） + 右侧特权快捷键
-    const stageTitleLbl = createLabel(this.root, `${stage.stageId}. ${stage.name}`, 34, '#FFE082', 0, 444, 500, 42, true);
+    // 3. 关卡大标题 + 左右特权快捷键
+    const titleY = topBarY - topBarH / 2 - 44;
+    const stageTitleLbl = createLabel(this.root, `${stage.stageId}. ${stage.name}`, 38, '#FFE082', 0, titleY, 480, 48, true);
     if (this.prevStageId > 0 && this.prevStageId !== stage.stageId) {
       const dir = stage.stageId > this.prevStageId ? 1 : -1;
       const op = stageTitleLbl.node.addComponent(UIOpacity);
       op.opacity = 0;
-      stageTitleLbl.node.setPosition(0, 444 - dir * 18, 0);
-      tween(stageTitleLbl.node).to(0.22, { position: new Vec3(0, 444, 0) }, { easing: 'quadOut' }).start();
+      stageTitleLbl.node.setPosition(0, titleY - dir * 18, 0);
+      tween(stageTitleLbl.node).to(0.22, { position: new Vec3(0, titleY, 0) }, { easing: 'quadOut' }).start();
       tween(op).to(0.22, { opacity: 255 }).start();
     }
     if (this.prevStageId > 0 && this.prevStageId !== stage.stageId && this.prevTitle) {
-      // 旧标题上滑/下滑淡出
       const dir = stage.stageId > this.prevStageId ? 1 : -1;
-      const ghost = createLabel(this.root, this.prevTitle, 34, '#FFE082', 0, 444, 500, 42, true);
+      const ghost = createLabel(this.root, this.prevTitle, 38, '#FFE082', 0, titleY, 480, 48, true);
       const gop = ghost.node.addComponent(UIOpacity);
       gop.opacity = 255;
-      tween(ghost.node).to(0.2, { position: new Vec3(0, 444 + dir * 18, 0) }, { easing: 'quadIn' })
+      tween(ghost.node).to(0.2, { position: new Vec3(0, titleY + dir * 18, 0) }, { easing: 'quadIn' })
         .call(() => { if (ghost.node.isValid) ghost.node.destroy(); }).start();
       tween(gop).to(0.2, { opacity: 0 }).start();
     }
     this.prevStageId = stage.stageId;
     this.prevTitle = `${stage.stageId}. ${stage.name}`;
-    createButton(this.root, '月卡', 84, 42, '#5E35B1', async () => {
+    createButton(this.root, '月卡', 102, 50, '#5E35B1', async () => {
       const r = await this.shopService.purchase('monthly_card');
       if (r.ok) { this.dataMgr.profile.diamond += 300; this.dataMgr.save(); showToast(this.root, '月卡激活! 元宝+300'); this.render(); }
       else showToast(this.root, r.msg);
-    }, -288, 444, 17);
-    const firstChargeBtn = createButton(this.root, '首充', 84, 42, '#C62828', async () => {
+    }, -296, titleY, 22);
+    const firstChargeBtn = createButton(this.root, '首充', 102, 50, '#C62828', async () => {
       const r = await this.shopService.purchase('first_charge');
       if (r.ok) { this.dataMgr.profile.diamond += 200; this.dataMgr.save(); showToast(this.root, '首充礼包! 元宝+200'); this.render(); }
       else showToast(this.root, r.msg);
-    }, 288, 444, 17);
+    }, 296, titleY, 22);
     attachIdleBreath(firstChargeBtn.node, { mode: BreathMode.Scale, amp: 0.04, period: 1.3 });
-    addShimmerEffect(firstChargeBtn.node, 84, 42);
+    addShimmerEffect(firstChargeBtn.node, 102, 50);
 
     // 4. 普通 / 挑战 双叶切换
-    const normalModeBtn = createButton(this.root, '普通模式', 210, 48, !this.challengeMode ? '#FFB300' : '#262032', () => {
+    const modeY = titleY - 64;
+    const normalModeBtn = createButton(this.root, '普通模式', 246, 56, !this.challengeMode ? '#FFB300' : '#262032', () => {
       this.challengeMode = false; this.render();
-    }, -112, 390, 20, '#FFE082', !this.challengeMode ? '#1A1426' : '#CFD8DC');
-    if (!this.challengeMode) addShimmerEffect(normalModeBtn.node, 210, 48);
+    }, -134, modeY, 24, '#FFE082', !this.challengeMode ? '#1A1426' : '#CFD8DC');
+    if (!this.challengeMode) addShimmerEffect(normalModeBtn.node, 246, 56);
 
     const chLabel = challengeUnlocked
       ? `精英挑战 (${this.dataMgr.challengeStars(stage.stageId)}★)`
       : '挑战(3星解锁)';
-    createButton(this.root, chLabel, 210, 48, this.challengeMode ? '#D84315' : (challengeUnlocked ? '#3E2723' : '#546E7A'), () => {
+    createButton(this.root, chLabel, 246, 56, this.challengeMode ? '#D84315' : (challengeUnlocked ? '#3E2723' : '#546E7A'), () => {
       if (!challengeUnlocked) return showToast(this.root, '需本关普通模式达成 3 星后解锁');
       this.challengeMode = true; this.render();
-    }, 112, 390, 19);
+    }, 134, modeY, 23);
+
+    // 底部行动区 & 三星宝箱区锚定到导航栏上方，中央沙盘自动填满中间全部空间
+    const actionY = layout.contentBottom + 66;
+    const boxPanelH = 166;
+    const boxPanelY = actionY + 66 + 16 + boxPanelH / 2;
+    const mapTop = modeY - 40;
+    const mapBottom = boxPanelY + boxPanelH / 2 + 16;
+    const mapH = Math.max(300, mapTop - mapBottom);
+    const mapY = (mapTop + mapBottom) / 2;
 
     // 5. 中央关卡沙盘展示区 + 左右翻页箭矢
-    const mapBox = createUINode('StageMapCard', 560, 310, this.root, 0, 195);
-    drawCardPanel(mapBox, 560, 310, '#221C2A', this.challengeMode ? '#FF7043' : '#C89B42', 16, 2);
+    const mapBox = createUINode('StageMapCard', 564, mapH, this.root, 0, mapY);
+    drawCardPanel(mapBox, 564, mapH, '#221C2A', this.challengeMode ? '#FF7043' : '#C89B42', 16, 2);
 
-    // 测试阶段放开全部 1~50 关，暂注释通关前置关卡限制
-    // const unlocked = stage.stageId <= p.maxClearedStage + 1;
     const unlocked = true;
-    createLabel(mapBox, stage.desc, 19, '#EFEBE9', 0, 122, 510, 28, true);
+    createLabel(mapBox, stage.desc, 23, '#EFEBE9', 0, mapH / 2 - 36, 500, 34, true);
 
-    // 左右阵营对峙立绘（各自待机呼吸 + VS 脉冲）
-    const spLord = ArtAssetManager.createSpriteNode(mapBox, HERO_ART_KEY_MAP.LORD, 86, 86, -155, 25);
+    const spLord = ArtAssetManager.createSpriteNode(mapBox, HERO_ART_KEY_MAP.LORD, 98, 98, -162, 22);
     if (spLord) attachIdleBreath(spLord, { mode: BreathMode.Scale, amp: 0.02, period: 1.7 });
-    const spH1 = ArtAssetManager.createSpriteNode(mapBox, HERO_ART_KEY_MAP.H01, 76, 76, -85, 52);
+    const spH1 = ArtAssetManager.createSpriteNode(mapBox, HERO_ART_KEY_MAP.H01, 86, 86, -88, 56);
     if (spH1) attachIdleBreath(spH1, { mode: BreathMode.Scale, amp: 0.02, period: 1.6, randomDelay: 0.6 });
-    const spH2 = ArtAssetManager.createSpriteNode(mapBox, HERO_ART_KEY_MAP.H02, 76, 76, -85, -14);
+    const spH2 = ArtAssetManager.createSpriteNode(mapBox, HERO_ART_KEY_MAP.H02, 86, 86, -88, -22);
     if (spH2) attachIdleBreath(spH2, { mode: BreathMode.Scale, amp: 0.02, period: 1.8, randomDelay: 0.8 });
-    const vsLbl = createLabel(mapBox, 'VS', 32, '#FFB300', 0, 18, 80, 40, true);
-    attachGlowPulse(vsLbl.node, 70, '#FFB300', 0, 0, true, { minOpacity: 80, maxOpacity: 210, scaleAmp: 0.14 });
+    const vsLbl = createLabel(mapBox, 'VS', 38, '#FFB300', 0, 18, 90, 46, true);
+    attachGlowPulse(vsLbl.node, 84, '#FFB300', 0, 0, true, { minOpacity: 80, maxOpacity: 210, scaleAmp: 0.14 });
     const bossKey = MONSTER_ART_KEY_MAP[stage.bossId];
-    const spBoss = ArtAssetManager.createSpriteNode(mapBox, bossKey, 124, 124, 145, 22);
+    const spBoss = ArtAssetManager.createSpriteNode(mapBox, bossKey, 144, 144, 148, 22);
     if (spBoss) attachIdleBreath(spBoss, { mode: BreathMode.Scale, amp: 0.025, period: 1.9, randomDelay: 0.4 });
 
     // 军情提示横幅
-    const hintStrip = createUINode('HintStrip', 524, 48, mapBox, 0, -108);
-    drawRoundedBox(hintStrip, 524, 48, '#120F18', 220, 10, '#5E4B2E', 1);
-    createLabel(hintStrip, stage.bossHint, 16, unlocked ? '#FFE082' : '#FF8A65', 0, 0, 496, 40, true);
-    createButton(mapBox, '?', 38, 38, '#3949AB', () => this.showStageInfoModal(stage.stageId), 244, 118, 20);
+    const hintStrip = createUINode('HintStrip', 532, 60, mapBox, 0, -mapH / 2 + 44);
+    drawRoundedBox(hintStrip, 532, 60, '#120F18', 225, 12, '#5E4B2E', 1.5);
+    createLabel(hintStrip, stage.bossHint, 20, unlocked ? '#FFE082' : '#FF8A65', 0, 0, 504, 52, true);
+    createButton(mapBox, '?', 46, 46, '#3949AB', () => this.showStageInfoModal(stage.stageId), 246, mapH / 2 - 36, 24);
 
-    // 左右换关大箭头（横向轻浮动）+ 测试期快捷 -5/+5 跳关
-    const prevBtn = createButton(this.root, '◀', 66, 96, this.selectedStageId > 1 ? '#2A2234' : '#3A3A44', () => {
+    // 左右换关大箭头 + 测试期快捷 -5/+5 跳关
+    const prevBtn = createButton(this.root, '◀', 74, 114, this.selectedStageId > 1 ? '#2A2234' : '#3A3A44', () => {
       if (this.selectedStageId > 1) { this.selectedStageId--; this.render(); }
-    }, -326, 210, 28);
+    }, -326, mapY + 28, 34);
     if (this.selectedStageId > 1) attachIdleBreath(prevBtn.node, { mode: BreathMode.Float, horizontal: true, amp: -3, period: 1.1 });
-    createButton(this.root, '«-5', 66, 42, this.selectedStageId > 1 ? '#31263F' : '#3A3A44', () => {
+    createButton(this.root, '«-5', 74, 52, this.selectedStageId > 1 ? '#31263F' : '#3A3A44', () => {
       if (this.selectedStageId > 1) { this.selectedStageId = Math.max(1, this.selectedStageId - 5); this.render(); }
-    }, -326, 126, 17);
+    }, -326, mapY - 68, 21);
 
-    const nextBtn = createButton(this.root, '▶', 66, 96, this.selectedStageId < STAGE_CONFIGS.length ? '#2A2234' : '#3A3A44', () => {
+    const nextBtn = createButton(this.root, '▶', 74, 114, this.selectedStageId < STAGE_CONFIGS.length ? '#2A2234' : '#3A3A44', () => {
       if (this.selectedStageId < STAGE_CONFIGS.length) { this.selectedStageId++; this.render(); }
-    }, 326, 210, 28);
+    }, 326, mapY + 28, 34);
     if (this.selectedStageId < STAGE_CONFIGS.length) attachIdleBreath(nextBtn.node, { mode: BreathMode.Float, horizontal: true, amp: 3, period: 1.1 });
-    createButton(this.root, '+5»', 66, 42, this.selectedStageId < STAGE_CONFIGS.length ? '#31263F' : '#3A3A44', () => {
+    createButton(this.root, '+5»', 74, 52, this.selectedStageId < STAGE_CONFIGS.length ? '#31263F' : '#3A3A44', () => {
       if (this.selectedStageId < STAGE_CONFIGS.length) { this.selectedStageId = Math.min(STAGE_CONFIGS.length, this.selectedStageId + 5); this.render(); }
-    }, 326, 126, 17);
+    }, 326, mapY - 68, 21);
 
-    // 6. 三星宝箱进度条（可领取宝箱附带轻晃动效）
-    const boxPanel = createUINode('StarBoxes', 706, 142, this.root, 0, -48);
-    drawCardPanel(boxPanel, 706, 142, '#1A1522', '#8D6E43', 14, 2);
-    const track = createUINode('TrackBg', 540, 10, boxPanel, 0, 28);
-    drawRoundedBox(track, 540, 10, '#120D18', 235, 5);
+    // 6. 三星宝箱进度条
+    const boxPanel = createUINode('StarBoxes', 720, boxPanelH, this.root, 0, boxPanelY);
+    drawCardPanel(boxPanel, 720, boxPanelH, '#1A1522', '#8D6E43', 16, 2);
+    const track = createUINode('TrackBg', 560, 12, boxPanel, 0, 36);
+    drawRoundedBox(track, 560, 12, '#120D18', 235, 6);
     if (prog.bestStars > 0) {
-      const fill = createUINode('TrackFill', Math.round(540 * (prog.bestStars / 3)), 10, track, -270 + Math.round(270 * (prog.bestStars / 3)), 0);
-      drawLeftAlignedBar(fill, Math.round(540 * (prog.bestStars / 3)), 10, '#FFB300', 5);
+      const fill = createUINode('TrackFill', Math.round(560 * (prog.bestStars / 3)), 12, track, -280 + Math.round(280 * (prog.bestStars / 3)), 0);
+      drawLeftAlignedBar(fill, Math.round(560 * (prog.bestStars / 3)), 12, '#FFB300', 6);
     }
 
     const starNames = ['成功通关', '50%血通关', '完美通关'];
@@ -267,28 +279,26 @@ export class HallView {
       const reached = prog.bestStars >= i;
       const claimed = (prog.claimedMask & bit) !== 0;
       const canOpen = reached && !claimed;
-      const x = (i - 2) * 224;
+      const x = (i - 2) * 230;
       let chestSp: Node | null = null;
       const chestBtn = createButton(
         boxPanel,
         '',
-        186, 106,
+        204, 122,
         claimed ? '#2E2A38' : reached ? '#4E342E' : '#241D2E',
         () => {
           if (!canOpen) {
-            // 未达成 / 已领取：灰暗静止，只给轻微抖动提示
             playShakeDeny(chestBtn.node);
             showToast(this.root, claimed ? '该宝箱已领取' : `本关达成 ${i} 星后可领取`);
             return;
           }
           const r = this.dataMgr.claimStageBox(stage.stageId, i as 1 | 2 | 3);
           if (!r.ok) return showToast(this.root, r.msg);
-          const chestPos = new Vec3(x, -38, 0);
+          const chestPos = new Vec3(x, boxPanelY, 0);
           const onOpen = () => {
-            playFlyIcons(this.root, chestPos, new Vec3(130, 555, 0), 5, 'icon_gold', '#FFD54F');
+            playFlyIcons(this.root, chestPos, new Vec3(130, topBarY, 0), 5, 'icon_gold', '#FFD54F');
             FloatText.show(this.root, chestBtn.node.worldPosition, '宝箱开启!', FloatStyle.gold);
             showToast(this.root, r.msg);
-            // 等开箱+飞行动画播完再刷新；期间若已切走页面则不重绘
             tween(this.root).delay(0.9).call(() => {
               if (this.root.getChildByName('HallBg')) this.render();
             }).start();
@@ -296,38 +306,36 @@ export class HallView {
           if (chestSp) playChestOpen(chestSp, this.root, chestPos, onOpen);
           else onOpen();
         },
-        x, -4, 16, claimed ? '#78909C' : reached ? '#FFD54F' : '#5D4037'
+        x, -4, 20, claimed ? '#78909C' : reached ? '#FFD54F' : '#5D4037'
       );
       if (canOpen) {
-        // 已达成未领取：浮动 + 光晕 + 红点
-        attachGlowPulse(chestBtn.node, 104, '#FFD54F', 0, 12, true, { minOpacity: 90, maxOpacity: 230, scaleAmp: 0.14 });
-        chestSp = ArtAssetManager.createSpriteNode(chestBtn.node, 'icon_chest', 54, 54, 0, 14);
+        attachGlowPulse(chestBtn.node, 114, '#FFD54F', 0, 14, true, { minOpacity: 90, maxOpacity: 230, scaleAmp: 0.14 });
+        chestSp = ArtAssetManager.createSpriteNode(chestBtn.node, 'icon_chest', 62, 62, 0, 16);
         if (chestSp) addChestWiggle(chestSp);
-        const dot = createUINode('RedDot', 16, 16, chestBtn.node, 66, 36);
-        drawRoundedBox(dot, 16, 16, '#E53935', 255, 8, '#FFD54F', 1);
+        const dot = createUINode('RedDot', 18, 18, chestBtn.node, 74, 42);
+        drawRoundedBox(dot, 18, 18, '#E53935', 255, 9, '#FFD54F', 1);
         attachIdleBreath(dot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3, randomDelay: 2 });
       } else {
-        // 未达成 / 已领取：变灰、无任何动效
-        chestSp = ArtAssetManager.createSpriteNode(chestBtn.node, 'icon_chest', 54, 54, 0, 14);
+        chestSp = ArtAssetManager.createSpriteNode(chestBtn.node, 'icon_chest', 62, 62, 0, 16);
         setIconGray(chestSp, true);
       }
       const stTxt = claimed ? '已领取' : reached ? '可领取!' : starNames[i - 1];
       const stCol = claimed ? '#90A4AE' : reached ? '#69F0AE' : '#FFE082';
-      createLabel(chestBtn.node, stTxt, 17, stCol, 0, -32, 170, 26, true);
+      createLabel(chestBtn.node, stTxt, 21, stCol, 0, -38, 186, 28, true);
     }
 
-    // 7. 底部行动区：左下巡逻挂机 + 黄金流光「开始战斗」大按钮
+    // 7. 底部行动区：左下巡逻挂机 + 黄金流光「开始战斗」大按钮（紧贴导航栏上方）
     const patrolP = this.dataMgr.getPatrolPending();
     const patrolBtn = createButton(
       this.root,
       `巡逻挂机\n(${patrolP.gold}铜)`,
-      154, 96,
+      180, 112,
       '#2E7D32',
       () => this.showPatrolModal(),
-      -268, -222, 18, '#A5D6A7'
+      -268, actionY, 22, '#A5D6A7'
     );
     attachIdleBreath(patrolBtn.node, { mode: BreathMode.Float, amp: 4, period: 1.4 });
-    if (patrolP.gold > 0) attachCoinBubbles(patrolBtn.node, 0, 46, 2); // 可领取：头顶冒金币气泡
+    if (patrolP.gold > 0) attachCoinBubbles(patrolBtn.node, 0, 54, 2);
 
     const enoughStamina = p.stamina >= stage.costStamina;
     const canStart = unlocked && enoughStamina;
@@ -337,8 +345,8 @@ export class HallView {
     const startBtn = createButton(
       this.root,
       startText,
-      462, 98,
-      canStart ? (this.challengeMode ? '#D84315' : '#FFB300') : '#546E7A', // 粮草不足/未解锁：置灰
+      504, 114,
+      canStart ? (this.challengeMode ? '#D84315' : '#FFB300') : '#546E7A',
       () => {
         if (!unlocked) {
           playShakeDeny(startBtn.node);
@@ -350,18 +358,17 @@ export class HallView {
           FloatText.show(this.root, startBtn.node.worldPosition, '粮草不足!', FloatStyle.warn);
           return showToast(this.root, '粮草不足!');
         }
-        // 进入战斗：0.4s 转场（压暗收缩 + 剑光），盖满后再切场景
         this.transitioning = true;
         playBattleTransition(this.root, () => {
           this.transitioning = false;
           this.callbacks.onStartBattle(stage.stageId, this.challengeMode);
         });
       },
-      74, -222, 26, '#FFF8E1', canStart && !this.challengeMode ? '#1A1426' : '#FFFFFF'
+      94, actionY, 30, '#FFF8E1', canStart && !this.challengeMode ? '#1A1426' : '#FFFFFF'
     );
     if (canStart) {
       attachIdleBreath(startBtn.node, { mode: BreathMode.Scale, amp: 0.03, period: 1.5 });
-      addShimmerEffect(startBtn.node, 462, 98);
+      addShimmerEffect(startBtn.node, 504, 114);
     }
 
     // 8. 统一底部导航栏

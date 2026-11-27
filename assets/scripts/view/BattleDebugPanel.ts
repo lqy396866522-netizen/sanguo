@@ -21,59 +21,59 @@ export class BattleDebugPanel {
   private curFps = 60;
   private refreshTimer = 0;
 
-  constructor(parent: Node, world: BattleWorld, showToggleByDefault = false) {
+  constructor(parent: Node, world: BattleWorld, showToggleByDefault = true, btnX = -312, btnY = 180) {
     this.root = parent;
     this.world = world;
 
-    // 折叠入口按钮默认隐藏（可从暂停弹窗内一键开启，保证正常对局界面干净）
-    const toggleBtn = createButton(parent, 'DBG', 66, 36, '#263238', () => {
+    // 左侧功能栏 DBG 快捷入口按钮
+    const toggleBtn = createButton(parent, '调试\nDBG', 96, 68, '#263238', () => {
       this.expanded = !this.expanded;
       this.panel.active = this.expanded;
       if (this.expanded) this.refreshText();
-    }, -310, 500, 16);
+    }, btnX, btnY, 22);
     this.toggleNode = toggleBtn.node;
     this.toggleNode.setSiblingIndex(999);
     this.toggleNode.active = showToggleByDefault;
 
-    this.panel = createUINode('DebugPanel', 320, 410, parent, -190, 290);
-    drawRoundedBox(this.panel, 320, 410, '#10141C', 220, 12, '#4FC3F7', 1.5);
-    createLabel(this.panel, '节奏与数值校准 (DBG)', 16, '#4FC3F7', 0, 184, 300, 24, true);
+    this.panel = createUINode('DebugPanel', 380, 460, parent, -150, 220);
+    drawRoundedBox(this.panel, 380, 460, '#10141C', 235, 14, '#4FC3F7', 2);
+    createLabel(this.panel, '节奏与数值校准 (DBG)', 21, '#4FC3F7', 0, 204, 350, 30, true);
 
-    this.lblStats = createLabel(this.panel, '', 14, '#ECEFF1', 0, 74, 296, 184, false);
+    this.lblStats = createLabel(this.panel, '', 17, '#ECEFF1', 0, 80, 352, 205, false);
     this.lblStats.horizontalAlign = Label.HorizontalAlign.LEFT;
     this.lblStats.verticalAlign = Label.VerticalAlign.TOP;
 
-    // 快捷调试按钮（两排）
+    // 快捷调试按钮（三排）
     const addBtn = (text: string, x: number, y: number, color: string, fn: () => void) => {
-      createButton(this.panel, text, 92, 34, color, () => {
+      createButton(this.panel, text, 112, 40, color, () => {
         fn();
         this.refreshText();
-      }, x, y, 13);
+      }, x, y, 16);
     };
 
-    addBtn('下1波', -98, -58, '#1565C0', () => {
+    addBtn('下1波', -118, -62, '#1565C0', () => {
       const next = Math.min(20, this.world.waveDirector.currentWaveIndex + 1);
       this.world.debugJumpWave(next);
     });
-    addBtn('跳W7将', 0, -58, '#4527A0', () => this.world.debugJumpWave(7));
-    addBtn('跳W14骑', 98, -58, '#4527A0', () => this.world.debugJumpWave(14));
+    addBtn('跳W7将', 0, -62, '#4527A0', () => this.world.debugJumpWave(7));
+    addBtn('跳W14骑', 118, -62, '#4527A0', () => this.world.debugJumpWave(14));
 
-    addBtn('跳W18医', -98, -98, '#6A1B9A', () => this.world.debugJumpWave(18));
-    addBtn('跳W20王', 0, -98, '#B71C1C', () => this.world.debugJumpWave(20));
-    addBtn('秒杀全屏', 98, -98, '#C62828', () => this.world.debugKillAllMonsters());
+    addBtn('跳W18医', -118, -108, '#6A1B9A', () => this.world.debugJumpWave(18));
+    addBtn('跳W20王', 0, -108, '#B71C1C', () => this.world.debugJumpWave(20));
+    addBtn('秒杀全屏', 118, -108, '#C62828', () => this.world.debugKillAllMonsters());
 
-    addBtn('+10经验', -98, -138, '#2E7D32', () => this.world.debugAddExp(10));
-    addBtn('血压25%', 0, -138, '#E65100', () => this.world.debugDamageWallTo(0.25));
-    addBtn('打印日志', 98, -138, '#37474F', () => {
+    addBtn('+10经验', -118, -154, '#2E7D32', () => this.world.debugAddExp(10));
+    addBtn('血压25%', 0, -154, '#E65100', () => this.world.debugDamageWallTo(0.25));
+    addBtn('打印日志', 118, -154, '#37474F', () => {
       const rep = this.world.getTelemetryReport();
       console.log('[Sanguo-Stage1-Telemetry]', JSON.stringify(rep));
       showToast(this.root, '已在控制台打印升级与血量曲线');
     });
 
-    createButton(this.panel, '收起面板', 140, 32, '#455A64', () => {
+    createButton(this.panel, '收起面板', 170, 40, '#455A64', () => {
       this.expanded = false;
       this.panel.active = false;
-    }, 0, -180, 14);
+    }, 0, -202, 18);
 
     this.panel.active = false;
   }
@@ -117,7 +117,7 @@ export class BattleDebugPanel {
 
     this.lblStats.string = [
       `时间: ${w.elapsed.toFixed(1)}s  |  波次: ${wave}/20`,
-      `等级: Lv.${w.battleLevel} (${w.battleExp}/${w.expNeeded}) 下一级目标:${nextTarget ?? '-'}s`,
+      `等级: Lv.${w.battleLevel} (${w.battleExp.toFixed(1)}/${w.expNeeded}) 下一级目标:${nextTarget ?? '-'}s`,
       `最近升级: ${lvDiffStr}`,
       `敌人: ${w.monsters.length}  |  武将: ${w.deployedHeroes.size}  |  援军: ${w.allyGuards.length}`,
       `城墙: ${w.wallHp}/${w.maxWallHp} (${hpPct}%)  |  绝境:${w.crisisTriggered ? '已触' : '未触'}`,

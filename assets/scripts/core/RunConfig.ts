@@ -75,7 +75,10 @@ export const RUN_CONFIG = {
     afterNormalWave: 0.8, // 清空普通波后最多等待的空档
     afterNodeWave: 1.8,   // 节点波结束后的呼吸空档（秒）
   },
-  // 敌人经验与漏怪扣血比例
+  // 怪物数量倍率与单怪经验倍率（普通小兵及盾/骑/医数量×3，精英与Boss保持原数量；单怪经验为原有1/3）
+  monsterSwarmMult: 3,
+  monsterExpScale: 1 / 3,
+  // 敌人基础经验与漏怪扣血比例
   expByRole: {
     normal: 1,
     shield: 2,

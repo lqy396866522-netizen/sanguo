@@ -186,6 +186,10 @@ export class BattleView {
   private previewPos: { x: number; y: number } | null = null;
   private draggingHeroId: string | null = null;
   private dragPos: { x: number; y: number } | null = null;
+  private deployDimNode!: Node;
+  private deployHighlightLayer!: Node;
+  private deployHeroHighlightNode: Node | null = null;
+  private leftDbgY = 180;
   private activeVfxs: ActiveVfx[] = [];
   private shownPhase: string = '';
   private settled = false;
@@ -261,8 +265,16 @@ export class BattleView {
     const vfxNode = createUINode('VfxLayer', 750, 1334, this.field, 0, 0);
     this.vfxG = vfxNode.addComponent(Graphics);
 
+    // 选将落位时的背景置灰遮罩（置于战场实体之上、选位高亮与拖拽范围之下）
+    this.deployDimNode = createUINode('DeployDimMask', 750, 1750, this.field, 0, 0);
+    drawRoundedBox(this.deployDimNode, 750, 1750, '#090B12', 162, 0);
+    this.deployDimNode.active = false;
+
     const dragNode = createUINode('DragLayer', 750, 1334, this.field, 0, 0);
     this.dragG = dragNode.addComponent(Graphics);
+
+    // 选将落位时的英雄高亮展示层
+    this.deployHighlightLayer = createUINode('DeployHighlightLayer', 750, 1334, this.field, 0, 0);
 
     this.slotLabelLayer = createUINode('SlotLabelLayer', 750, 1334, this.field, 0, 0);
     this.floatLayer = createUINode('FloatLayer', 750, 1334, this.field, 0, 0);
@@ -286,8 +298,8 @@ export class BattleView {
     });
 
     this.modalLayer = createUINode('ModalLayer', 750, visH, this.root, 0, 0);
-    // 默认隐藏 DBG 悬浮按钮（可从暂停弹窗一键开启）
-    this.debugPanel = new BattleDebugPanel(this.modalLayer, this.world, false);
+    // 默认显示 DBG 悬浮按钮，置于左侧功能栏下方
+    this.debugPanel = new BattleDebugPanel(this.modalLayer, this.world, true, -312, this.leftDbgY);
   }
 
   private bindWorldEvents(): void {
@@ -558,31 +570,22 @@ export class BattleView {
     drawLeftAlignedBar(this.comboBarFill, 134, 5, '#FF7043', 2);
     this.comboBox.active = false;
 
-    // 左侧功能按钮放大（96x78，字号22，真机约40pt高度确保好点清晰）
+    // 左侧功能按钮放大（96x78，字号24，真机清晰好点）
     const leftBtnX = -312;
-    const speedBtn = createButton(hud, 'x1.0\n倍速', 96, 78, '#283593', async () => {
-      if (this.world.userSpeed === 1.0) {
-        this.world.setUserSpeed(1.5);
-        this.lblSpeed.string = 'x1.5\n倍速';
-      } else if (this.world.userSpeed === 1.5) {
-        const res = await this.adService.showRewardedAd('battle_speed_2x');
-        if (res.completed) {
-          this.world.setUserSpeed(2.0);
-          this.lblSpeed.string = 'x2.0\n极速';
-          showToast(this.root, '已解锁 2.0x 极速战斗!');
-        } else {
-          this.world.setUserSpeed(1.0);
-          this.lblSpeed.string = 'x1.0\n倍速';
-        }
-      } else {
-        this.world.setUserSpeed(1.0);
-        this.lblSpeed.string = 'x1.0\n倍速';
-      }
-    }, leftBtnX, topY - 96, 22);
+    const speedSteps = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0];
+    // 全档位当前免费直接切换（后期接入 VIP 系统后再按需限制）
+    const speedBtn = createButton(hud, 'x1.0\n倍速', 96, 78, '#283593', () => {
+      const curIdx = speedSteps.findIndex((s) => Math.abs(s - this.world.userSpeed) < 0.05);
+      const next = speedSteps[(curIdx + 1) % speedSteps.length];
+      this.world.setUserSpeed(next);
+      const tag = next >= 4.0 ? '狂飙' : next >= 2.0 ? '极速' : '倍速';
+      this.lblSpeed.string = `x${next.toFixed(1)}\n${tag}`;
+    }, leftBtnX, topY - 96, 24);
     this.lblSpeed = speedBtn.label;
 
-    createButton(hud, '怪物\n情报', 96, 78, '#5E35B1', () => this.showMonsterInfoModal(), leftBtnX, topY - 186, 22);
-    createButton(hud, '伤害\n统计', 96, 78, '#1B5E20', () => this.showDamageStatsModal(), leftBtnX, topY - 276, 22);
+    createButton(hud, '怪物\n情报', 96, 78, '#5E35B1', () => this.showMonsterInfoModal(), leftBtnX, topY - 186, 24);
+    createButton(hud, '伤害\n统计', 96, 78, '#1B5E20', () => this.showDamageStatsModal(), leftBtnX, topY - 276, 24);
+    this.leftDbgY = topY - 362;
 
     this.rightHeroBox = createUINode('RightHeroes', 84, 560, hud, 322, topY - 335);
 
@@ -1217,23 +1220,42 @@ export class BattleView {
     const g = this.dragG;
     g.clear();
 
-    // 任意空地布阵预览：实时显示绿/红合法圈 + 真实攻击范围圆圈
-    if (this.world.phase === 'DEPLOY_PICK' && this.world.pendingHeroToPlace && this.previewPos) {
-      const check = this.world.isPositionValidForDeploy(this.previewPos.x, this.previewPos.y);
-      const sx = this.toX(this.previewPos.x);
-      const sy = this.toY(this.previewPos.y);
-      const r = this.world.pendingHeroToPlace.range;
-      const col = check.valid ? '#69F0AE' : '#FF5252';
-      g.fillColor = hexToColor(col, 42);
-      g.circle(sx, sy, r);
-      g.fill();
-      g.strokeColor = hexToColor(col, 230);
-      g.lineWidth = 3;
-      g.circle(sx, sy, r);
-      g.stroke();
-      g.fillColor = hexToColor(col, 160);
-      g.circle(sx, sy, 24);
-      g.fill();
+    // 选将待落位状态：在灰幕之上高亮空闲推荐阵位 + 实时显示预览位置范围圈与高亮英雄跟随
+    if (this.world.phase === 'DEPLOY_PICK' && this.world.pendingHeroToPlace) {
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() * 0.006);
+      for (const slot of this.world.suggestedSlots) {
+        if (this.occupiedSlots.has(slot.id)) continue;
+        const sx = this.toX(slot.x);
+        const sy = this.toY(slot.y);
+        g.fillColor = hexToColor('#69F0AE', Math.round(55 + pulse * 45));
+        g.circle(sx, sy, 34 + pulse * 6);
+        g.fill();
+        g.strokeColor = hexToColor('#B9F6CA', Math.round(180 + pulse * 75));
+        g.lineWidth = 3;
+        g.circle(sx, sy, 34 + pulse * 6);
+        g.stroke();
+      }
+
+      if (this.previewPos) {
+        const check = this.world.isPositionValidForDeploy(this.previewPos.x, this.previewPos.y);
+        const sx = this.toX(this.previewPos.x);
+        const sy = this.toY(this.previewPos.y);
+        const r = this.world.pendingHeroToPlace.range;
+        const col = check.valid ? '#69F0AE' : '#FF5252';
+        g.fillColor = hexToColor(col, 55);
+        g.circle(sx, sy, r);
+        g.fill();
+        g.strokeColor = hexToColor(col, 245);
+        g.lineWidth = 3.5;
+        g.circle(sx, sy, r);
+        g.stroke();
+        g.fillColor = hexToColor(col, 185);
+        g.circle(sx, sy, 28);
+        g.fill();
+        if (this.deployHeroHighlightNode && this.deployHeroHighlightNode.isValid) {
+          this.deployHeroHighlightNode.setPosition(sx, sy + 6, 0);
+        }
+      }
     }
 
     // 自由拖拽换位时实时显示合法圈 + 真实攻击范围圆圈
@@ -1569,6 +1591,13 @@ export class BattleView {
     if (this.crisisModal) { this.crisisModal.destroy(); this.crisisModal = null; }
     if (this.deployTipNode) { this.deployTipNode.destroy(); this.deployTipNode = null; }
     if (this.reviveModal) { this.reviveModal.destroy(); this.reviveModal = null; }
+    if (this.deployDimNode && this.deployDimNode.isValid) {
+      this.deployDimNode.active = this.world.phase === 'DEPLOY_PICK';
+    }
+    if (this.deployHighlightLayer && this.deployHighlightLayer.isValid) {
+      this.deployHighlightLayer.removeAllChildren();
+      this.deployHeroHighlightNode = null;
+    }
 
     if (this.world.phase === 'ROGUE_CHOICE') {
       TimeScaleManager.rampTo('modal', 0, 0.15);
@@ -1581,6 +1610,7 @@ export class BattleView {
     } else if (this.world.phase === 'DEPLOY_PICK') {
       TimeScaleManager.rampTo('modal', 1, 0.12);
       this.previewPos = null;
+      this.buildDeployHeroHighlight();
       this.updateDeployTip();
     } else if (this.world.phase === 'REVIVE_ASK') {
       TimeScaleManager.rampTo('modal', 0, 0.15);
@@ -1774,44 +1804,77 @@ export class BattleView {
     });
   }
 
+  private buildDeployHeroHighlight(): void {
+    if (!this.deployHighlightLayer || !this.deployHighlightLayer.isValid) return;
+    this.deployHighlightLayer.removeAllChildren();
+    this.deployHeroHighlightNode = null;
+    const hero = this.world.pendingHeroToPlace;
+    if (!hero) return;
+
+    // 默认先高亮悬浮在第一个空闲推荐阵位（若无则居中偏上），点击战场后实时跟随 previewPos
+    const freeSlot = this.world.suggestedSlots.find((s) => !this.occupiedSlots.has(s.id));
+    const initX = freeSlot ? this.toX(freeSlot.x) : 0;
+    const initY = freeSlot ? this.toY(freeSlot.y) + 10 : 120;
+
+    const holder = createUINode('DeployHeroHighlight', 150, 150, this.deployHighlightLayer, initX, initY);
+    this.deployHeroHighlightNode = holder;
+
+    // 强光底环 + 脉冲光晕（在灰幕之上格外醒目）
+    attachGlowPulse(holder, 168, '#FFD54F', 0, 0, true, { minOpacity: 150, maxOpacity: 255, scaleAmp: 0.18, period: 1.0 });
+    const ring = createUINode('HeroRing', 112, 112, holder, 0, 0);
+    drawRoundedBox(ring, 112, 112, '#2B1F0A', 210, 56, '#FFE57F', 4);
+
+    const artKey = HERO_ART_KEY_MAP[hero.id];
+    const sp = artKey ? ArtAssetManager.createSpriteNode(holder, artKey, 108, 108, 0, 6) : null;
+    if (sp) {
+      attachIdleBreath(sp, { mode: BreathMode.Float, amp: 8, period: 0.9 });
+    } else {
+      createLabel(holder, hero.name, 26, '#FFE57F', 0, 4, 104, 34, true);
+    }
+
+    const tagBg = createUINode('DeployTag', 184, 34, holder, 0, -68);
+    drawRoundedBox(tagBg, 184, 34, '#1B1325', 240, 12, '#FFE57F', 2);
+    createLabel(tagBg, `待布阵 · ${hero.name}`, 20, '#FFE57F', 0, 0, 174, 28, true);
+  }
+
   private updateDeployTip(): void {
     if (this.deployTipNode) { this.deployTipNode.destroy(); this.deployTipNode = null; }
     const hero = this.world.pendingHeroToPlace;
     if (!hero) return;
 
-    // 放在城防防线上方空区，完全避开左侧倍速/怪物情报按钮与上方出怪道
-    const tip = createUINode('DeployTip', 680, 108, this.modalLayer, 0, -390);
+    // 放在城防防线上方醒目区，加大卡片、字号与按钮，避免“卡住”错觉
+    const tip = createUINode('DeployTip', 706, 136, this.modalLayer, 0, -370);
     this.deployTipNode = tip;
-    drawCardPanel(tip, 680, 108, '#1B1325', hero.colorHex, 16, 2);
+    drawCardPanel(tip, 706, 136, '#1B1325', '#FFE57F', 18, 3);
 
-    let msg = `点击战场任意非道路空地预览【${hero.name}】(${hero.rangeLabel}射程/${hero.canHitAir ? '可对空' : '仅地面'})`;
+    let msg = `请点击战场亮绿阵位或空地放置【${hero.name}】(${hero.rangeLabel}射程/${hero.canHitAir ? '可对空' : '仅地面'})`;
     let validPreview = false;
     if (this.previewPos) {
       const check = this.world.isPositionValidForDeploy(this.previewPos.x, this.previewPos.y);
       validPreview = check.valid;
       msg = check.valid
-        ? `已预览 ${hero.name}，点击“确认上阵”或再次点击该处落位`
+        ? `已选定【${hero.name}】位置，点击“确认上阵”或再次点击该处落位`
         : `不可放置：${check.reason}，请点选道路外空地`;
     }
-    createLabel(tip, msg, 17, validPreview ? '#69F0AE' : '#FFE082', 0, 24, 640, 32, true);
+    createLabel(tip, msg, 22, validPreview ? '#69F0AE' : '#FFE57F', 0, 34, 676, 40, true);
 
     if (validPreview && this.previewPos) {
       const px = this.previewPos.x;
       const py = this.previewPos.y;
-      createButton(tip, '确认上阵', 200, 44, '#2E7D32', () => {
+      createButton(tip, '确认上阵', 240, 56, '#2E7D32', () => {
         const res = this.world.placePendingHeroAt(px, py);
         if (res.ok) {
           this.previewPos = null;
           AudioManager.playSfx('sfx_deploy');
         } else showToast(this.root, res.reason || '不可放置');
-      }, -120, -22, 19);
+      }, -138, -28, 24);
     }
 
-    createButton(tip, '智能推荐布阵', 210, 44, '#1565C0', () => {
+    createButton(tip, '智能推荐布阵', 250, 56, '#1565C0', () => {
       this.world.autoPlacePendingHero();
       this.previewPos = null;
       AudioManager.playSfx('sfx_deploy');
-    }, validPreview ? 120 : 0, -22, 19);
+    }, validPreview ? 138 : 0, -28, 24);
   }
 
   private showMonsterInfoModal(): void {

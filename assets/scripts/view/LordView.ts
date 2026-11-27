@@ -1,4 +1,4 @@
-import { Button, Node, Sprite, tween, UIOpacity, Vec3 } from 'cc';
+import { Button, Label, Node, Sprite, tween, UIOpacity, Vec3 } from 'cc';
 import {
   EQUIP_SET_BONUS,
   EQUIP_SLOT_NAMES,
@@ -33,6 +33,7 @@ import {
   drawRoundedBox,
   drawWoodCard,
   formatEquipAffix,
+  getScreenLayout,
   hexToColor,
   playBurstParticles,
   playFlyIcons,
@@ -90,18 +91,22 @@ export class LordView {
     const setStatus = this.dataMgr.getEquipSetStatus();
     const schemeBit = 1 << p.activeScheme;
 
-    // 1. 暖木流云 Q 版背景
-    const bg = createUINode('LordBg', 750, 1750, this.root, 0, 0);
-    drawRoundedBox(bg, 750, 1750, '#3D271B', 255, 0);
+    // 1. 暖木流云 Q 版背景（自适应全屏高度）
+    const layout = getScreenLayout();
+    const bgH = Math.max(1850, layout.visH + 100);
+    const bg = createUINode('LordBg', 750, bgH, this.root, 0, 0);
+    drawRoundedBox(bg, 750, bgH, '#3D271B', 255, 0);
     const lordBgKey = ArtAssetManager.has('bg_lord') ? 'bg_lord' : 'bg_hall';
-    ArtAssetManager.createSpriteNode(bg, lordBgKey, 980, 1750, 0, 0);
+    ArtAssetManager.createSpriteNode(bg, lordBgKey, 980, bgH, 0, 0);
 
-    // 2. 顶部主公状态栏（圆角木纹流云金边，y=545 避开微信胶囊）
-    const topBar = createUINode('LordTopBar', 716, 90, this.root, 0, 545);
-    drawCloudPanel(topBar, 716, 90, '#4E3728', '#E5B454', 18);
-    createLabel(topBar, `主公 Lv.${p.level}`, 22, '#FFE8A3', -248, 16, 165, 28, true);
+    // 2. 顶部主公状态栏（紧贴屏幕顶部，消除上方留白）
+    const topBarH = 104;
+    const topBarY = layout.contentTop - topBarH / 2;
+    const topBar = createUINode('LordTopBar', 724, topBarH, this.root, 0, topBarY);
+    drawCloudPanel(topBar, 724, topBarH, '#4E3728', '#E5B454', 18);
+    createLabel(topBar, `主公 Lv.${p.level}`, 26, '#FFE8A3', -246, 20, 185, 34, true);
     const curPower = this.dataMgr.getCombatPower();
-    const powerLbl = createLabel(topBar, `战力 ${curPower}`, 20, '#81F7B4', -248, -16, 165, 26, true);
+    const powerLbl = createLabel(topBar, `战力 ${curPower}`, 24, '#81F7B4', -246, -20, 185, 30, true);
     const nrPow = attachNumberRoll(powerLbl.node, LordView.lastPower >= 0 ? LordView.lastPower : curPower, { prefix: '战力 ', tintOnIncrease: true });
     if (LordView.lastPower >= 0 && LordView.lastPower !== curPower) {
       nrPow.rollTo(curPower);
@@ -110,18 +115,19 @@ export class LordView {
       }
     }
     LordView.lastPower = curPower;
-    createLabel(topBar, `全军攻:${bonus.baseAtk}  城防:${bonus.maxWallHp}`, 18, '#FFF5E6', 65, 16, 360, 26, true);
+    createLabel(topBar, `全军攻:${bonus.baseAtk}  城防:${bonus.maxWallHp}`, 23, '#FFF5E6', 78, 20, 400, 32, true);
     const kForge = ArtAssetManager.has('icon_forge_ore') ? 'icon_forge_ore' : 'icon_forge';
     const kRef = ArtAssetManager.has('icon_refine_crystal') ? 'icon_refine_crystal' : 'icon_refine';
     const kCoin = ArtAssetManager.has('icon_coin_s') ? 'icon_coin_s' : 'icon_gold';
-    ArtAssetManager.createSpriteNode(topBar, kForge, 20, 20, -68, -16);
-    createLabel(topBar, `锻造:${p.forgeStone}`, 15, '#FFE0B2', -22, -16, 80, 22, true);
-    ArtAssetManager.createSpriteNode(topBar, kRef, 20, 20, 42, -16);
-    createLabel(topBar, `洗炼:${p.refineStone}`, 15, '#E1BEE7', 88, -16, 80, 22, true);
-    ArtAssetManager.createSpriteNode(topBar, kCoin, 20, 20, 152, -16);
-    createLabel(topBar, `铜:${p.gold}`, 15, '#FFE57F', 202, -16, 92, 22, true);
+    ArtAssetManager.createSpriteNode(topBar, kForge, 24, 24, -84, -20);
+    createLabel(topBar, `锻:${p.forgeStone}`, 20, '#FFE0B2', -30, -20, 88, 26, true);
+    ArtAssetManager.createSpriteNode(topBar, kRef, 24, 24, 42, -20);
+    createLabel(topBar, `洗:${p.refineStone}`, 20, '#E1BEE7', 96, -20, 88, 26, true);
+    ArtAssetManager.createSpriteNode(topBar, kCoin, 24, 24, 168, -20);
+    createLabel(topBar, `铜:${p.gold}`, 20, '#FFE57F', 236, -20, 114, 26, true);
 
     // 3. 左侧 4 个 Q 版圆润高光入口徽章（天赋 / 套装 / 兵符 / 神兵）
+    const midTopY = topBarY - topBarH / 2 - 14;
     const freeTalPts = this.dataMgr.talentPointsTotal() - this.dataMgr.talentPointsUsed();
     const talismanActionable = TALISMAN_CONFIGS.some((cfg) => {
       const sv = p.talismans?.[cfg.id];
@@ -137,44 +143,45 @@ export class LordView {
       { label: '神兵', bgHex: '#C62828', iconKey: 'icon_weapon', highlight: weaponActionable, onClick: () => this.showWeaponModal() },
     ];
     sideItems.forEach((it, idx) => {
-      const y = 435 - idx * 90;
-      const btn = createButton(this.root, it.iconKey ? '' : it.label, 84, 72, it.bgHex, it.onClick, -300, y, 16, '#FFE8A3');
+      const y = midTopY - 46 - idx * 96;
+      const btn = createButton(this.root, it.iconKey ? '' : it.label, 96, 84, it.bgHex, it.onClick, -304, y, 21, '#FFE8A3');
       if (it.iconKey) {
-        ArtAssetManager.createSpriteNode(btn.node, it.iconKey, 38, 38, 0, 8);
-        createLabel(btn.node, it.label, 14, '#FFFFFF', 0, -20, 72, 20, true);
+        ArtAssetManager.createSpriteNode(btn.node, it.iconKey, 44, 44, 0, 10);
+        createLabel(btn.node, it.label, 18, '#FFFFFF', 0, -24, 86, 24, true);
       }
       if (it.highlight) attachIdleBreath(btn.node, { mode: BreathMode.Scale, amp: 0.035, period: 1.4 });
       if (it.badge) {
-        const b = createUINode('Badge', 56, 20, btn.node, 0, 32);
-        drawRoundedBox(b, 56, 20, '#2B1B14', 240, 10, '#E5B454', 1.5);
-        createLabel(b, it.badge, 12, '#81F7B4', 0, 0, 52, 18, true);
+        const b = createUINode('Badge', 68, 24, btn.node, 0, 38);
+        drawRoundedBox(b, 68, 24, '#2B1B14', 245, 11, '#E5B454', 1.5);
+        createLabel(b, it.badge, 16, '#81F7B4', 0, 0, 64, 22, true);
       }
       if (it.highlight) {
-        const dot = createUINode('RedDot', 14, 14, btn.node, 28, 28);
-        drawRoundedBox(dot, 14, 14, '#E53935', 255, 7, '#FFD54F', 1);
+        const dot = createUINode('RedDot', 16, 16, btn.node, 34, 34);
+        drawRoundedBox(dot, 16, 16, '#E53935', 255, 8, '#FFD54F', 1);
         attachIdleBreath(dot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3, randomDelay: idx * 0.6 });
       }
     });
 
     // 4. 中央主公展示台（圆角木纹流云金边 + 旋转光晕 + 卡通「装备锻造」）
-    const heroStage = createUINode('LordStage', 236, 260, this.root, -104, 330);
-    drawCloudPanel(heroStage, 236, 260, '#4A3425', '#E5B454', 18);
-    attachSpinLoop(heroStage, 180, 18, '#FFD54F', 0, 18, true);
-    attachGlowPulse(heroStage, 150, '#FFB300', 0, 18, true, { minOpacity: 70, maxOpacity: 170, scaleAmp: 0.08 });
-    const lordSp = ArtAssetManager.createSpriteNode(heroStage, HERO_ART_KEY_MAP.LORD, 168, 168, 0, 18);
+    const stageH = 290;
+    const stageY = midTopY - stageH / 2;
+    const heroStage = createUINode('LordStage', 244, stageH, this.root, -110, stageY);
+    drawCloudPanel(heroStage, 244, stageH, '#4A3425', '#E5B454', 18);
+    attachSpinLoop(heroStage, 196, 18, '#FFD54F', 0, 24, true);
+    attachGlowPulse(heroStage, 164, '#FFB300', 0, 24, true, { minOpacity: 70, maxOpacity: 170, scaleAmp: 0.08 });
+    const lordSp = ArtAssetManager.createSpriteNode(heroStage, HERO_ART_KEY_MAP.LORD, 184, 184, 0, 26);
     if (lordSp) attachIdleBreath(lordSp, { mode: BreathMode.Scale, amp: 0.015, period: 1.8 });
     const setStr = setStatus.active
       ? `${QUALITY_NAMES[setStatus.minQuality]}套装 全军+${setStatus.bonusPct}%`
       : `集齐6件激活套装 (${setStatus.equippedCount}/6)`;
-    const setLbl = createLabel(heroStage, setStr, 15, setStatus.active ? '#81F7B4' : '#FFE082', 0, -86, 224, 24, true);
+    const setLbl = createLabel(heroStage, setStr, 19, setStatus.active ? '#81F7B4' : '#FFE082', 0, -90, 232, 28, true);
     if (setStatus.active) {
-      const setSweep = attachShineSweep(setLbl.node, 224, 24, { loop: false, duration: 0.6 });
+      const setSweep = attachShineSweep(setLbl.node, 232, 28, { loop: false, duration: 0.6 });
       if (!LordView.lastSetActive) {
-        // 套装刚激活：文字条从左滑入，落定后扫光一次
         const sop = setLbl.node.addComponent(UIOpacity);
         sop.opacity = 0;
-        setLbl.node.setPosition(-150, -86, 0);
-        tween(setLbl.node).to(0.3, { position: new Vec3(0, -86, 0) }, { easing: 'backOut' })
+        setLbl.node.setPosition(-150, -90, 0);
+        tween(setLbl.node).to(0.3, { position: new Vec3(0, -90, 0) }, { easing: 'backOut' })
           .call(() => setSweep.playOnce()).start();
         tween(sop).to(0.25, { opacity: 255 }).start();
       } else {
@@ -182,65 +189,63 @@ export class LordView {
       }
     }
     LordView.lastSetActive = setStatus.active;
-    createLabel(heroStage, `纯统帅辅助 · 暴伤+${Math.round(bonus.globalCritDmgBonus * 100)}%`, 14, '#EFE0CE', 0, -110, 224, 22, true);
+    createLabel(heroStage, `纯统帅辅助 · 暴伤+${Math.round(bonus.globalCritDmgBonus * 100)}%`, 17, '#EFE0CE', 0, -120, 232, 26, true);
 
-    // 装备锻造独立入口按钮（卡通明金高光质感）
+    // 装备锻造独立入口按钮（卡通明金高光质感，放大）
+    const forgeBtnY = stageY - stageH / 2 - 42;
     const forgeBtn = createButton(
       this.root,
       '装备锻造',
-      228, 58,
+      244, 66,
       '#FFB300',
       () => {
         this.inForge = true;
         this.render();
       },
-      -104, 160, 22, '#FFF8E1', '#2B180A'
+      -110, forgeBtnY, 26, '#FFF8E1', '#2B180A'
     );
-    attachShineSweep(forgeBtn.node, 228, 58, { loop: true, interval: 2.6 });
+    attachShineSweep(forgeBtn.node, 244, 66, { loop: true, interval: 2.6 });
 
     // 5. 右侧 2×3 装备槽位区（6 部位）
+    const slotTopY = midTopY - 62;
+    const slotRowStep = 128;
     let glowBudget = 10;
     for (let s = 1; s <= 6; s++) {
       const col = (s - 1) % 2;
       const row = Math.floor((s - 1) / 2);
-      const x = 135 + col * 145;
-      const y = 418 - row * 124;
+      const x = 132 + col * 150;
+      const y = slotTopY - row * slotRowStep;
       const slot = p.equipSlots[s];
       const hasEq = slot.equipTier > 0 && slot.equipQuality > 0;
       const q = hasEq ? slot.equipQuality : 1;
       const qColor = hasEq ? (QUALITY_COLORS[q] || '#CCCCCC') : '#607D8B';
 
-      const card = createUINode(`SlotCard_${s}`, 132, 114, this.root, x, y);
-      if (!ArtAssetManager.skinQualityCell(card, q, 132, 114)) {
-        drawRoundedBox(card, 132, 114, '#3D2E25', 242, 16, qColor, 2);
+      const card = createUINode(`SlotCard_${s}`, 140, 120, this.root, x, y);
+      if (!ArtAssetManager.skinQualityCell(card, q, 140, 120)) {
+        drawRoundedBox(card, 140, 120, '#3D2E25', 242, 16, qColor, 2);
       }
-      const slotIcon = ArtAssetManager.createSpriteNode(card, `eq_${s}`, 64, 64, 0, 6);
+      const slotIcon = ArtAssetManager.createSpriteNode(card, `eq_${s}`, 66, 66, 0, 8);
       if (slotIcon && LordView.pendingEquipSlot === s) {
-        // 穿戴成功：图标放大弹出 + 扫光一次
         slotIcon.setScale(0.3, 0.3, 1);
         tween(slotIcon).to(0.3, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-        attachShineSweep(card, 132, 114, { loop: false, duration: 0.55 }).playOnce();
+        attachShineSweep(card, 140, 120, { loop: false, duration: 0.55 }).playOnce();
       }
 
-      // 左上角阶位 / 未穿戴（柔和圆角胶囊）
-      const tierTag = createUINode('TierTag', 52, 22, card, -36, 40);
-      drawRoundedBox(tierTag, 52, 22, '#2B1D16', 230, 10, qColor, 1);
-      createLabel(tierTag, hasEq ? `${slot.equipTier}阶` : '空槽', 13, qColor, 0, 0, 50, 20, true);
+      const tierTag = createUINode('TierTag', 58, 26, card, -36, 42);
+      drawRoundedBox(tierTag, 58, 26, '#2B1D16', 235, 10, qColor, 1);
+      createLabel(tierTag, hasEq ? `${slot.equipTier}阶` : '空槽', 16, qColor, 0, 0, 54, 24, true);
 
-      // 右下角强化等级
-      createLabel(card, `${slot.slotLevel}级`, 15, '#FFFFFF', 32, -26, 56, 22, true);
-      createLabel(card, EQUIP_SLOT_NAMES[s as EquipSlotType], 14, '#FFE082', -32, -26, 56, 22, true);
+      createLabel(card, `${slot.slotLevel}级`, 18, '#FFFFFF', 34, -26, 60, 24, true);
+      createLabel(card, EQUIP_SLOT_NAMES[s as EquipSlotType], 17, '#FFE082', -34, -26, 60, 24, true);
 
-      // 底部 5 颗宝石小菱形指示
       const slotGems = p.gems.filter((g) => g.slotType === s && (g.schemeMask & schemeBit) !== 0 && g.holeIndex >= 0);
       for (let h = 0; h < 5; h++) {
         const gemInHole = slotGems.find((g) => g.holeIndex === h);
-        const dot = createUINode(`GemDot_${h}`, 12, 12, card, -36 + h * 18, -46);
-        drawRoundedBox(dot, 11, 11, gemInHole ? (QUALITY_COLORS[gemInHole.quality] || '#FFF') : '#2A2234', 255, 3, '#78909C', 1);
-        // 已镶嵌宝石微光呼吸（仅透明度，常驻 tween 总量封顶 10 条）
+        const dot = createUINode(`GemDot_${h}`, 14, 14, card, -40 + h * 20, -48);
+        drawRoundedBox(dot, 13, 13, gemInHole ? (QUALITY_COLORS[gemInHole.quality] || '#FFF') : '#2A2234', 255, 3, '#78909C', 1);
         if (gemInHole && glowBudget > 0) {
           glowBudget--;
-          attachGlowPulse(dot, 26, QUALITY_COLORS[gemInHole.quality] || '#FFFFFF', 0, 0, false, { minOpacity: 40, maxOpacity: 170, scaleAmp: 0, period: 1.6 });
+          attachGlowPulse(dot, 28, QUALITY_COLORS[gemInHole.quality] || '#FFFFFF', 0, 0, false, { minOpacity: 40, maxOpacity: 170, scaleAmp: 0, period: 1.6 });
         }
       }
 
@@ -248,7 +253,7 @@ export class LordView {
       btn.transition = Button.Transition.NONE;
       card.addComponent(ButtonFX);
       if (hasEq && q >= 4) {
-        attachShineSweep(card, 132, 114, { loop: true, interval: 3.2, randomDelay: 1.5 });
+        attachShineSweep(card, 140, 120, { loop: true, interval: 3.2, randomDelay: 1.5 });
       }
       card.on(Button.EventType.CLICK, () => {
         AudioManager.playSfx('sfx_click');
@@ -258,22 +263,24 @@ export class LordView {
       });
     }
 
-    // 6. 方案 1 / 2 / 3 卡通软倒角切换条
+    // 6. 方案 1 / 2 / 3 切换条（放大按钮与字号）
+    const schemeY = forgeBtnY - 64;
     for (let i = 0; i < 3; i++) {
       const act = p.activeScheme === i;
       const schemeBtn = createButton(
         this.root,
         `方案${i + 1}`,
-        122, 42,
+        148, 48,
         act ? '#FFB300' : '#6D4C41',
         () => { this.dataMgr.setActiveScheme(i); this.render(); },
-        -220 + i * 132, 96, 17, '#FFE8A3', act ? '#2B180A' : '#FFF3E0'
+        -228 + i * 160, schemeY, 22, '#FFE8A3', act ? '#2B180A' : '#FFF3E0'
       );
       if (act && LordView.lastScheme !== i) this.popSelected(schemeBtn.node);
     }
     LordView.lastScheme = p.activeScheme;
 
-    // 7. 背包切换页签（宝石 / 装备 / 强化工坊：卡通立体高光按钮）
+    // 7. 背包切换页签（宝石 / 装备 / 强化工坊）
+    const subTabY = schemeY - 62;
     const subTabs: { key: SubTab; label: string }[] = [
       { key: 'gem', label: `宝石 (${p.gems.length})` },
       { key: 'equip', label: `装备 (${(p.equipBag || []).length})` },
@@ -284,39 +291,47 @@ export class LordView {
       const subBtn = createButton(
         this.root,
         t.label,
-        216, 48,
+        228, 56,
         act ? '#FFB300' : '#6D4C41',
         () => { this.subTab = t.key; this.render(); },
-        -228 + idx * 228, 36, 19, '#FFE8A3', act ? '#2B180A' : '#FFF3E0'
+        -234 + idx * 234, subTabY, 23, '#FFE8A3', act ? '#2B180A' : '#FFF3E0'
       );
       if (act && LordView.lastSubTab !== t.key) this.popSelected(subBtn.node);
     });
     const subIdx = (k: SubTab | null) => subTabs.findIndex((t) => t.key === k);
 
-    // 8. 背包内容面板（圆角木纹与流云金边大底板，y = -248, height = 496）
-    const bagBox = createUINode('BagPanel', 718, 496, this.root, 0, -248);
-    drawCloudPanel(bagBox, 718, 496, '#483123', '#E5B454', 20);
+    // 8. 背包内容面板（动态延伸贴合底部导航栏上方，彻底消除下方留白）
+    const bagTop = subTabY - 36;
+    const bagBottom = layout.contentBottom;
+    const bagH = Math.max(460, bagTop - bagBottom);
+    const bagY = (bagTop + bagBottom) / 2;
+    const bagBox = createUINode('BagPanel', 724, bagH, this.root, 0, bagY);
+    drawCloudPanel(bagBox, 724, bagH, '#483123', '#E5B454', 20);
     if (LordView.lastSubTab !== null && LordView.lastSubTab !== this.subTab) {
-      // 切页签：内容区按切换方向横向滑入 + 淡入
       const dir = subIdx(this.subTab) > subIdx(LordView.lastSubTab) ? 1 : -1;
       const bop = bagBox.addComponent(UIOpacity);
       bop.opacity = 0;
-      bagBox.setPosition(dir * 80, -248, 0);
-      tween(bagBox).to(0.24, { position: new Vec3(0, -248, 0) }, { easing: 'quadOut' }).start();
+      bagBox.setPosition(dir * 80, bagY, 0);
+      tween(bagBox).to(0.24, { position: new Vec3(0, bagY, 0) }, { easing: 'quadOut' }).start();
       tween(bop).to(0.2, { opacity: 255 }).start();
     }
     LordView.lastSubTab = this.subTab;
     this.gemCells.clear();
 
+    const headerY = bagH / 2 - 36;
+    const gridAvailH = bagH - 86;
+    const cellRowStep = Math.floor(gridAvailH / 3);
+    const cellH = Math.max(128, Math.min(182, cellRowStep - 12));
+    const gridFirstY = headerY - 40 - cellH / 2;
+
     if (this.subTab === 'gem') {
-      createLabel(bagBox, '点击宝石镶嵌/卸下（同部位5孔功效不可重复）', 17, '#F5E4D0', -115, 218, 460, 26, true);
+      createLabel(bagBox, '点击宝石镶嵌/卸下（同部位5孔不可重复）', 20, '#F5E4D0', -118, headerY, 456, 30, true);
       const mergeUids = this.getMergeCandidateUids();
       const mergeable = mergeUids.size > 0;
-      const mergeBtn = createButton(bagBox, '一键合成 (5合1)', 210, 42, mergeable ? '#FFB300' : '#546E7A', () => {
+      const mergeBtn = createButton(bagBox, '一键合成(5合1)', 226, 48, mergeable ? '#FFB300' : '#546E7A', () => {
         if (!mergeable) return showToast(this.root, '暂无可合成的5颗同品未锁宝石');
         if (this.merging) return;
         this.merging = true;
-        // 合成：候选宝石向中心汇聚 → 爆闪 → 新宝石弹出
         const center = new Vec3(0, 20, 0);
         let i = 0;
         mergeUids.forEach((uid) => {
@@ -335,12 +350,11 @@ export class LordView {
           showToast(this.root, res.mergedCount > 0 ? `合成 ${res.mergedCount} 颗高品宝石!` : '暂无可合成的5颗同品未锁宝石');
           tween(bagBox).delay(0.3).call(() => { this.merging = false; this.render(); }).start();
         }).start();
-      }, 235, 218, 16, '#FFF8E1', mergeable ? '#2B180A' : '#FFFFFF');
+      }, 230, headerY, 20, '#FFF8E1', mergeable ? '#2B180A' : '#FFFFFF');
       if (mergeable) {
-        // 可合成：按钮呼吸 + 红点
         attachIdleBreath(mergeBtn.node, { mode: BreathMode.Scale, amp: 0.04, period: 1.3 });
-        const mdot = createUINode('RedDot', 14, 14, mergeBtn.node, 98, 18);
-        drawRoundedBox(mdot, 14, 14, '#E53935', 255, 7, '#FFD54F', 1);
+        const mdot = createUINode('RedDot', 16, 16, mergeBtn.node, 104, 20);
+        drawRoundedBox(mdot, 16, 16, '#E53935', 255, 8, '#FFD54F', 1);
         attachIdleBreath(mdot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3, randomDelay: 2 });
       }
 
@@ -352,24 +366,24 @@ export class LordView {
       });
 
       if (sorted.length === 0) {
-        createLabel(bagBox, '暂无宝石，通关关卡或开启星级宝箱即可获得！', 20, '#90A4AE', 0, 0, 560, 40, true);
+        createLabel(bagBox, '暂无宝石，通关关卡或开启星级宝箱即可获得！', 24, '#90A4AE', 0, 0, 620, 44, true);
       } else {
         sorted.slice(0, 12).forEach((gem, i) => {
           const col = i % 4;
           const row = Math.floor(i / 4);
-          const x = -252 + col * 168;
-          const y = 128 - row * 142;
-          this.renderGemCell(bagBox, gem, x, y, schemeBit);
+          const x = -255 + col * 170;
+          const y = gridFirstY - row * cellRowStep;
+          this.renderGemCell(bagBox, gem, x, y, schemeBit, cellH);
         });
       }
     } else if (this.subTab === 'equip') {
       const bag = p.equipBag || [];
-      createLabel(bagBox, '点击装备穿戴或分解（全套6件同品激活全军伤害加成）', 17, '#D7CCC8', -120, 218, 450, 26, true);
-      createButton(bagBox, '一键分解低品', 190, 42, '#D84315', () => {
+      createLabel(bagBox, '点击穿戴或分解（全套6件同品激活加成）', 20, '#D7CCC8', -118, headerY, 456, 30, true);
+      createButton(bagBox, '一键分解低品', 226, 48, '#D84315', () => {
         const res = this.dataMgr.decomposeLowQualityEquips(2);
         showToast(this.root, res.count > 0 ? `分解 ${res.count} 件：锻造石+${res.forgeStone}` : '暂无可分解的绿品及以下装备');
         this.render();
-      }, 240, 218, 16);
+      }, 230, headerY, 20);
 
       const equippedUids = new Set<string>();
       for (let s = 1; s <= 6; s++) {
@@ -385,37 +399,36 @@ export class LordView {
       });
 
       if (sortedEq.length === 0) {
-        createLabel(bagBox, '背囊空空，通关第 1 关即可直接获得首套装备！', 20, '#FFE082', 0, 0, 580, 40, true);
+        createLabel(bagBox, '背囊空空，通关第 1 关即可直接获得首套装备！', 24, '#FFE082', 0, 0, 620, 44, true);
       } else {
         sortedEq.slice(0, 12).forEach((eq, i) => {
           const col = i % 4;
           const row = Math.floor(i / 4);
-          const x = -252 + col * 168;
-          const y = 128 - row * 142;
-          this.renderEquipBagCell(bagBox, eq, x, y, equippedUids.has(eq.uid));
+          const x = -255 + col * 170;
+          const y = gridFirstY - row * cellRowStep;
+          this.renderEquipBagCell(bagBox, eq, x, y, equippedUids.has(eq.uid), cellH);
         });
       }
     } else {
-      // 材料与直达独立 ForgeView 锻造坊
-      createLabel(bagBox, '锻造材料库存与工坊入口', 24, '#FFE8A3', 0, 195, 420, 32, true);
+      createLabel(bagBox, '锻造材料库存与工坊入口', 28, '#FFE8A3', 0, headerY, 460, 38, true);
       const mats = [
         { icon: kForge, name: '锻造石', val: `${p.forgeStone}`, desc: '用于槽位强化与装备升品' },
         { icon: kRef, name: '洗炼石', val: `${p.refineStone}`, desc: '用于装备升品与洗炼词条' },
         { icon: kCoin, name: '铜钱', val: `${p.gold}`, desc: '用于强化、升品与招募培养' },
       ];
       mats.forEach((m, i) => {
-        const y = 100 - i * 86;
-        const row = createUINode(`MatRow_${i}`, 640, 74, bagBox, 0, y);
-        drawWoodCard(row, 640, 74, false, '#3B261C', '#C89B42');
-        ArtAssetManager.createSpriteNode(row, m.icon, 48, 48, -265, 0);
-        createLabel(row, m.name, 22, '#FFE8A3', -170, 12, 120, 28, true);
-        createLabel(row, m.desc, 16, '#E8D5C4', -40, -16, 360, 24, true);
-        createLabel(row, m.val, 26, '#81F7B4', 245, 0, 130, 32, true);
+        const y = headerY - 94 - i * 104;
+        const row = createUINode(`MatRow_${i}`, 664, 88, bagBox, 0, y);
+        drawWoodCard(row, 664, 88, false, '#3B261C', '#C89B42');
+        ArtAssetManager.createSpriteNode(row, m.icon, 56, 56, -276, 0);
+        createLabel(row, m.name, 25, '#FFE8A3', -168, 16, 140, 32, true);
+        createLabel(row, m.desc, 19, '#E8D5C4', -26, -18, 390, 28, true);
+        createLabel(row, m.val, 30, '#81F7B4', 252, 0, 140, 36, true);
       });
-      createButton(bagBox, '进入装备锻造工坊', 360, 66, '#FFB300', () => {
+      createButton(bagBox, '进入装备锻造工坊', 420, 76, '#FFB300', () => {
         this.inForge = true;
         this.render();
-      }, 0, -175, 24, '#FFF8E1', '#2B180A');
+      }, 0, -bagH / 2 + 64, 28, '#FFF8E1', '#2B180A');
     }
 
     // 镶嵌/卸下：宝石在背包与孔位之间飞行 + 闪光
@@ -423,8 +436,8 @@ export class LordView {
     if (pf) {
       const col = (pf.slotType - 1) % 2;
       const row = Math.floor((pf.slotType - 1) / 2);
-      const hole = new Vec3(135 + col * 145 - 36 + pf.holeIndex * 18, 418 - row * 124 - 46, 0);
-      const bagPos = new Vec3(0, -140, 0);
+      const hole = new Vec3(132 + col * 150 - 40 + pf.holeIndex * 20, slotTopY - row * slotRowStep - 48, 0);
+      const bagPos = new Vec3(0, bagY, 0);
       const color = QUALITY_COLORS[pf.quality] || '#FFFFFF';
       const from = pf.mode === 'equip' ? bagPos : hole;
       const to = pf.mode === 'equip' ? hole : bagPos;
@@ -462,31 +475,32 @@ export class LordView {
     tween(node).to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
   }
 
-  private renderGemCell(parent: Node, gem: GemItem, x: number, y: number, schemeBit: number): void {
+  private renderGemCell(parent: Node, gem: GemItem, x: number, y: number, schemeBit: number, cellH = 140): void {
     const equipped = (gem.schemeMask & schemeBit) !== 0;
     const qColor = QUALITY_COLORS[gem.quality] || '#CCCCCC';
     const meta = GEM_AFFIX_META[gem.affixType];
 
-    const cell = createUINode(`GemCell_${gem.uid}`, 154, 128, parent, x, y);
+    const cell = createUINode(`GemCell_${gem.uid}`, 158, cellH, parent, x, y);
     this.gemCells.set(gem.uid, cell);
-    if (!ArtAssetManager.skinQualityCell(cell, gem.quality, 154, 128)) {
-      drawRoundedBox(cell, 154, 128, '#231D2D', 240, 12, qColor, 2);
+    if (!ArtAssetManager.skinQualityCell(cell, gem.quality, 158, cellH)) {
+      drawRoundedBox(cell, 158, cellH, '#231D2D', 240, 12, qColor, 2);
     }
 
-    const gemSp = ArtAssetManager.createSpriteNode(cell, 'gem_hex', 58, 58, 0, 18);
+    const topY = cellH / 2 - 20;
+    const gemSp = ArtAssetManager.createSpriteNode(cell, 'gem_hex', 62, 62, 0, 16);
     if (gemSp) {
       const sp = gemSp.getComponent(Sprite);
       if (sp) sp.color = hexToColor(qColor, 255);
     }
 
-    createLabel(cell, EQUIP_SLOT_NAMES[gem.slotType], 14, '#FFE082', -44, 46, 56, 20, true);
+    createLabel(cell, EQUIP_SLOT_NAMES[gem.slotType], 18, '#FFE082', -44, topY, 64, 24, true);
     if (equipped) {
-      const tag = createUINode('EqTag', 48, 20, cell, 46, 46);
-      drawRoundedBox(tag, 48, 20, '#2E7D32', 235, 6, '#A5D6A7', 1);
-      createLabel(tag, '已镶', 12, '#FFFFFF', 0, 0, 46, 18, true);
+      const tag = createUINode('EqTag', 56, 24, cell, 46, topY);
+      drawRoundedBox(tag, 56, 24, '#2E7D32', 240, 6, '#A5D6A7', 1);
+      createLabel(tag, '已镶', 16, '#FFFFFF', 0, 0, 52, 22, true);
     }
-    createLabel(cell, `${meta.name}`, 14, '#FFFFFF', 0, -24, 142, 22, true);
-    createLabel(cell, `+${gem.affixValue}${meta.unit}`, 15, qColor, 0, -46, 130, 22, true);
+    createLabel(cell, `${meta.name}`, 18, '#FFFFFF', 0, -cellH / 2 + 44, 148, 26, true);
+    createLabel(cell, `+${gem.affixValue}${meta.unit}`, 20, qColor, 0, -cellH / 2 + 18, 138, 26, true);
 
     const btn = cell.addComponent(Button);
     btn.transition = Button.Transition.NONE;
@@ -496,27 +510,27 @@ export class LordView {
       this.showGemActionModal(gem, equipped);
     });
     if (LordView.newGemUids.indexOf(gem.uid) >= 0) {
-      // 合成产出：新宝石弹出 + 扫光
       cell.setScale(0, 0, 1);
       tween(cell).delay(0.05).to(0.35, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
-      attachShineSweep(cell, 154, 128, { loop: false, duration: 0.6 }).playOnce();
+      attachShineSweep(cell, 158, cellH, { loop: false, duration: 0.6 }).playOnce();
     }
   }
 
-  private renderEquipBagCell(parent: Node, eq: EquipItem, x: number, y: number, isEquipped: boolean): void {
+  private renderEquipBagCell(parent: Node, eq: EquipItem, x: number, y: number, isEquipped: boolean, cellH = 140): void {
     const qColor = QUALITY_COLORS[eq.quality] || '#CCCCCC';
-    const cell = createUINode(`EqBag_${eq.uid}`, 154, 128, parent, x, y);
-    if (!ArtAssetManager.skinQualityCell(cell, eq.quality, 154, 128)) {
-      drawRoundedBox(cell, 154, 128, '#231D2D', 240, 12, qColor, 2);
+    const cell = createUINode(`EqBag_${eq.uid}`, 158, cellH, parent, x, y);
+    if (!ArtAssetManager.skinQualityCell(cell, eq.quality, 158, cellH)) {
+      drawRoundedBox(cell, 158, cellH, '#231D2D', 240, 12, qColor, 2);
     }
-    ArtAssetManager.createSpriteNode(cell, `eq_${eq.slotType}`, 62, 62, 0, 14);
-    createLabel(cell, `${eq.tier}阶`, 14, qColor, -48, 46, 48, 20, true);
+    const topY = cellH / 2 - 20;
+    ArtAssetManager.createSpriteNode(cell, `eq_${eq.slotType}`, 66, 66, 0, 12);
+    createLabel(cell, `${eq.tier}阶`, 18, qColor, -46, topY, 54, 24, true);
     if (isEquipped) {
-      const tag = createUINode('WornTag', 48, 20, cell, 46, 46);
-      drawRoundedBox(tag, 48, 20, '#FFB300', 235, 6);
-      createLabel(tag, '已穿', 12, '#1A1426', 0, 0, 46, 18, true);
+      const tag = createUINode('WornTag', 56, 24, cell, 46, topY);
+      drawRoundedBox(tag, 56, 24, '#FFB300', 240, 6);
+      createLabel(tag, '已穿', 16, '#1A1426', 0, 0, 52, 22, true);
     }
-    createLabel(cell, `${EQUIP_SLOT_NAMES[eq.slotType]} · ${QUALITY_NAMES[eq.quality]}`, 14, '#FFFFFF', 0, -34, 144, 24, true);
+    createLabel(cell, `${EQUIP_SLOT_NAMES[eq.slotType]} · ${QUALITY_NAMES[eq.quality]}`, 18, '#FFFFFF', 0, -cellH / 2 + 24, 148, 28, true);
 
     const btn = cell.addComponent(Button);
     btn.transition = Button.Transition.NONE;
@@ -629,129 +643,160 @@ export class LordView {
   }
 
   private showTalismanModal(): void {
+    const layout = getScreenLayout();
+    const boxH = Math.min(1160, layout.visH - 110);
     const mask = createModalOverlay(this.root);
-    const box = createUINode('TalismanModal', 680, 780, mask, 0, 0);
-    drawCardPanel(box, 680, 780, '#1E162B', '#FFD54F', 18, 2);
-    ArtAssetManager.skinPanel(box, 680, 780);
+    const box = createUINode('TalismanModal', 720, boxH, mask, 0, 0);
+    drawCardPanel(box, 720, boxH, '#1E162B', '#FFD54F', 18, 2);
+    ArtAssetManager.skinPanel(box, 720, boxH);
     popInModal(box, mask);
     bindModalBackdropClose(mask, box);
 
     const p = this.dataMgr.profile;
     const equipped = p.equippedTalismans || [];
-    createLabel(box, `兵符军令 (${equipped.length}/2 已佩戴)`, 28, '#FFD54F', 0, 342, 460, 38, true);
-    createLabel(box, '兵符升至 3 级可激活强力被动，最多同时佩戴 2 枚', 17, '#D7CCC8', 0, 302, 560, 26, true);
+    const topY = boxH / 2 - 44;
+    createLabel(box, `兵符军令 (${equipped.length}/2 已佩戴)`, 32, '#FFD54F', 0, topY, 560, 44, true);
+    createLabel(box, '兵符升至 3 级可激活强力被动，最多同时佩戴 2 枚', 20, '#D7CCC8', 0, topY - 46, 650, 30, true);
+
+    const listTop = topY - 82;
+    const listBottom = -boxH / 2 + 88;
+    const rowStep = Math.floor((listTop - listBottom) / TALISMAN_CONFIGS.length);
+    const rowH = Math.max(106, Math.min(144, rowStep - 12));
 
     TALISMAN_CONFIGS.forEach((cfg, idx) => {
       const save = p.talismans?.[cfg.id] || { id: cfg.id, unlocked: false, level: 0 };
       const isEq = equipped.includes(cfg.id);
-      const y = 216 - idx * 94;
-      const row = createUINode(`Tal_${cfg.id}`, 624, 84, box, 0, y);
-      drawCardPanel(row, 624, 84, '#2A2038', isEq ? '#69F0AE' : cfg.colorHex, 12, isEq ? 2 : 1);
+      const y = listTop - rowH / 2 - idx * rowStep;
+      const row = createUINode(`Tal_${cfg.id}`, 676, rowH, box, 0, y);
+      drawCardPanel(row, 676, rowH, '#2A2038', isEq ? '#69F0AE' : cfg.colorHex, 14, isEq ? 2 : 1.5);
 
-      ArtAssetManager.createSpriteNode(row, 'icon_talisman', 46, 46, -270, 0);
-      createLabel(row, `${cfg.name} ${save.unlocked ? `Lv.${save.level}/5` : '(未解锁)'}`, 19, cfg.colorHex, -135, 18, 220, 26, true);
-      createLabel(row, `${cfg.desc} | ${cfg.passiveDesc}`, 13, '#E0E0E0', -45, -16, 370, 32, true);
+      ArtAssetManager.createSpriteNode(row, 'icon_talisman', 54, 54, -296, 0);
+      // 左侧文字区严格避开右侧按钮区域，防止重叠与字号缩得过小
+      const textW = save.unlocked ? 336 : 390;
+      const textX = -254 + textW / 2;
+      const titleLbl = createLabel(row, `${cfg.name} ${save.unlocked ? `Lv.${save.level}/5` : '(未解锁)'}`, 24, cfg.colorHex, textX, 26, textW, 32, true);
+      titleLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
+      const descLbl = createLabel(row, `${cfg.desc}\n${cfg.passiveDesc}`, 18, '#F0ECE6', textX, -20, textW, 56, true);
+      descLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
 
       if (!save.unlocked) {
         const canStage = p.maxClearedStage >= cfg.unlockStage;
         const label = canStage ? (cfg.unlockCostDiamond > 0 ? `解锁(${cfg.unlockCostDiamond}宝)` : '免费解锁') : `第${cfg.unlockStage}关`;
-        createButton(row, label, 134, 48, canStage && p.diamond >= cfg.unlockCostDiamond ? '#2E7D32' : '#546E7A', () => {
+        createButton(row, label, 168, 58, canStage && p.diamond >= cfg.unlockCostDiamond ? '#2E7D32' : '#546E7A', () => {
           const r = this.dataMgr.unlockOrUpgradeTalisman(cfg.id);
           showToast(this.root, r.msg);
           if (r.ok) { mask.destroy(); this.showTalismanModal(); this.render(); }
-        }, 230, 0, 15);
+        }, 236, 0, 21);
       } else {
-        createButton(row, isEq ? '卸下' : '佩戴', 92, 46, isEq ? '#C62828' : '#3949AB', () => {
+        createButton(row, isEq ? '卸下' : '佩戴', 108, 56, isEq ? '#C62828' : '#3949AB', () => {
           const r = isEq ? this.dataMgr.unequipTalisman(cfg.id) : this.dataMgr.equipTalisman(cfg.id);
           showToast(this.root, r.msg);
           mask.destroy(); this.showTalismanModal(); this.render();
-        }, 162, 0, 16);
+        }, 152, 0, 22);
 
         const upCost = save.level * 150;
-        createButton(row, save.level >= 5 ? '满级' : `升级`, 92, 46, save.level < 5 && p.diamond >= upCost ? '#FFB300' : '#546E7A', () => {
+        createButton(row, save.level >= 5 ? '满级' : `升级`, 108, 56, save.level < 5 && p.diamond >= upCost ? '#FFB300' : '#546E7A', () => {
           const r = this.dataMgr.unlockOrUpgradeTalisman(cfg.id);
           showToast(this.root, r.msg);
           if (r.ok) { mask.destroy(); this.showTalismanModal(); this.render(); }
-        }, 260, 0, 16, '#FFF8E1', save.level < 5 && p.diamond >= upCost ? '#1A1426' : '#FFFFFF');
+        }, 270, 0, 22, '#FFF8E1', save.level < 5 && p.diamond >= upCost ? '#1A1426' : '#FFFFFF');
       }
     });
 
-    createButton(box, '关闭', 180, 50, '#546E7A', () => mask.destroy(), 0, -342, 20);
+    createButton(box, '关闭', 240, 62, '#546E7A', () => mask.destroy(), 0, -boxH / 2 + 44, 24);
   }
 
   private showTalentModal(branch: TalentBranch = 'atk'): void {
+    const layout = getScreenLayout();
+    const boxH = Math.min(1040, layout.visH - 140);
     const mask = createModalOverlay(this.root);
-    const box = createUINode('TalentModal', 640, 740, mask, 0, 0);
-    drawCardPanel(box, 640, 740, '#1E162B', '#5C6BC0', 18, 2);
-    ArtAssetManager.skinPanel(box, 640, 740);
+    const box = createUINode('TalentModal', 700, boxH, mask, 0, 0);
+    drawCardPanel(box, 700, boxH, '#1E162B', '#5C6BC0', 18, 2);
+    ArtAssetManager.skinPanel(box, 700, boxH);
     popInModal(box, mask);
     bindModalBackdropClose(mask, box);
 
     const total = this.dataMgr.talentPointsTotal();
     const used = this.dataMgr.talentPointsUsed();
-    createLabel(box, `主公天赋 (可用点数 ${total - used}/${total})`, 26, '#FFD54F', 0, 320, 500, 36, true);
+    const topY = boxH / 2 - 48;
+    createLabel(box, `主公天赋 (可用点数 ${total - used}/${total})`, 30, '#FFD54F', 0, topY, 580, 42, true);
 
     (['atk', 'def', 'res'] as TalentBranch[]).forEach((b, i) => {
       const act = b === branch;
-      createButton(box, TALENT_BRANCH_NAMES[b], 170, 48, act ? '#FFB300' : '#2C1F3D', () => {
+      createButton(box, TALENT_BRANCH_NAMES[b], 200, 56, act ? '#FFB300' : '#2C1F3D', () => {
         mask.destroy(); this.showTalentModal(b);
-      }, (i - 1) * 190, 260, 20, '#FFE082', act ? '#1A1426' : '#FFFFFF');
+      }, (i - 1) * 214, topY - 70, 24, '#FFE082', act ? '#1A1426' : '#FFFFFF');
     });
 
     const list = TALENT_CONFIGS.filter((t) => t.branch === branch);
+    const listTop = topY - 126;
+    const listBottom = -boxH / 2 + 96;
+    const rowStep = Math.floor((listTop - listBottom) / Math.max(1, list.length));
+    const rowH = Math.max(108, Math.min(144, rowStep - 14));
     list.forEach((t, idx) => {
       const lv = this.dataMgr.profile.talents[t.id] || 0;
-      const y = 160 - idx * 108;
-      const row = createUINode(`Tal_${t.id}`, 580, 92, box, 0, y);
-      drawCardPanel(row, 580, 92, '#2A2038', '#7986CB', 12, 1);
-      createLabel(row, `${t.name} (${lv}/${t.maxLevel})`, 22, '#FFE082', -110, 18, 300, 28, true);
-      createLabel(row, t.desc.replace('{v}', String(t.perLevel)), 17, '#E0E0E0', -110, -18, 320, 26, true);
+      const y = listTop - rowH / 2 - idx * rowStep;
+      const row = createUINode(`Tal_${t.id}`, 652, rowH, box, 0, y);
+      drawCardPanel(row, 652, rowH, '#2A2038', '#7986CB', 14, 1.5);
+      const tLbl = createLabel(row, `${t.name} (${lv}/${t.maxLevel})`, 25, '#FFE082', -96, 22, 410, 34, true);
+      tLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
+      const dLbl = createLabel(row, t.desc.replace('{v}', String(t.perLevel)), 20, '#E0E0E0', -96, -22, 410, 32, true);
+      dLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
       const canUp = lv < t.maxLevel && used < total;
-      createButton(row, lv >= t.maxLevel ? '满级' : '升级', 132, 52, canUp ? '#2E7D32' : '#546E7A', () => {
+      createButton(row, lv >= t.maxLevel ? '满级' : '升级', 156, 60, canUp ? '#2E7D32' : '#546E7A', () => {
         const r = this.dataMgr.upgradeTalent(t.id);
         showToast(this.root, r.msg);
         if (r.ok) { mask.destroy(); this.showTalentModal(branch); this.render(); }
-      }, 200, 0, 19);
+      }, 228, 0, 23);
     });
 
-    createButton(box, '洗点 (100元宝)', 200, 50, '#C62828', () => {
+    createButton(box, '洗点 (100元宝)', 240, 60, '#C62828', () => {
       const r = this.dataMgr.resetTalents();
       showToast(this.root, r.msg);
       if (r.ok) { mask.destroy(); this.showTalentModal(branch); this.render(); }
-    }, -130, -312, 18);
-    createButton(box, '关闭', 180, 50, '#546E7A', () => mask.destroy(), 130, -312, 20);
+    }, -148, -boxH / 2 + 48, 22);
+    createButton(box, '关闭', 220, 60, '#546E7A', () => mask.destroy(), 148, -boxH / 2 + 48, 24);
   }
 
   private showWeaponModal(): void {
+    const layout = getScreenLayout();
+    const boxH = Math.min(1080, layout.visH - 130);
     const mask = createModalOverlay(this.root);
-    const box = createUINode('WeaponModal', 640, 740, mask, 0, 0);
-    drawCardPanel(box, 640, 740, '#1E162B', '#FF7043', 18, 2);
-    ArtAssetManager.skinPanel(box, 640, 740);
+    const box = createUINode('WeaponModal', 700, boxH, mask, 0, 0);
+    drawCardPanel(box, 700, boxH, '#1E162B', '#FF7043', 18, 2);
+    ArtAssetManager.skinPanel(box, 700, boxH);
     popInModal(box, mask);
     bindModalBackdropClose(mask, box);
 
     const p = this.dataMgr.profile;
-    createLabel(box, `神兵帅印 (当前: ${getWeaponConfig(p.weaponId).name})`, 26, '#FFD54F', 0, 320, 520, 36, true);
+    const topY = boxH / 2 - 48;
+    createLabel(box, `神兵帅印 (当前: ${getWeaponConfig(p.weaponId).name})`, 30, '#FFD54F', 0, topY, 620, 42, true);
 
+    const listTop = topY - 56;
+    const listBottom = -boxH / 2 + 92;
+    const rowStep = Math.floor((listTop - listBottom) / Math.max(1, WEAPON_CONFIGS.length));
+    const rowH = Math.max(106, Math.min(144, rowStep - 12));
     WEAPON_CONFIGS.forEach((w, idx) => {
       const owned = p.ownedWeapons.includes(w.id);
       const equipped = p.weaponId === w.id;
-      const y = 210 - idx * 102;
-      const row = createUINode(`Wpn_${w.id}`, 580, 88, box, 0, y);
-      drawCardPanel(row, 580, 88, '#2A2038', equipped ? '#69F0AE' : w.bulletColor, 12, equipped ? 2 : 1);
-      createLabel(row, w.name, 22, w.bulletColor, -140, 18, 220, 28, true);
-      createLabel(row, w.desc, 16, '#E0E0E0', -100, -18, 340, 26, true);
+      const y = listTop - rowH / 2 - idx * rowStep;
+      const row = createUINode(`Wpn_${w.id}`, 652, rowH, box, 0, y);
+      drawCardPanel(row, 652, rowH, '#2A2038', equipped ? '#69F0AE' : w.bulletColor, 14, equipped ? 2 : 1.5);
+      const wName = createLabel(row, w.name, 25, w.bulletColor, -96, 22, 410, 34, true);
+      wName.horizontalAlign = Label.HorizontalAlign.LEFT;
+      const wDesc = createLabel(row, w.desc, 19, '#E0E0E0', -96, -20, 410, 34, true);
+      wDesc.horizontalAlign = Label.HorizontalAlign.LEFT;
 
       const btnText = equipped ? '已装备' : owned ? '装备' : `${w.costDiamond}宝`;
       const btnCol = equipped ? '#546E7A' : owned ? '#2E7D32' : (p.level >= w.unlockLordLevel && p.diamond >= w.costDiamond ? '#FFB300' : '#546E7A');
-      createButton(row, btnText, 140, 52, btnCol, () => {
+      createButton(row, btnText, 160, 58, btnCol, () => {
         if (equipped) return;
         const r = owned ? this.dataMgr.equipWeapon(w.id) : this.dataMgr.buyWeapon(w.id);
         showToast(this.root, r.msg);
         if (r.ok) { mask.destroy(); this.showWeaponModal(); this.render(); }
-      }, 200, 0, 18, '#FFF8E1', !owned && p.level >= w.unlockLordLevel && p.diamond >= w.costDiamond ? '#1A1426' : '#FFFFFF');
+      }, 228, 0, 22, '#FFF8E1', !owned && p.level >= w.unlockLordLevel && p.diamond >= w.costDiamond ? '#1A1426' : '#FFFFFF');
     });
 
-    createButton(box, '关闭', 180, 50, '#546E7A', () => mask.destroy(), 0, -315, 20);
+    createButton(box, '关闭', 240, 62, '#546E7A', () => mask.destroy(), 0, -boxH / 2 + 46, 24);
   }
 }

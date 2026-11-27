@@ -14,6 +14,7 @@ import {
   Tween,
   Vec3,
   Layers,
+  view,
 } from 'cc';
 import { AudioManager } from './AudioManager';
 import { ArtAssetManager } from './ArtAssetManager';
@@ -262,9 +263,48 @@ export function createButton(
   return { node, label };
 }
 
+export interface ScreenLayout {
+  visH: number;
+  halfH: number;
+  topEdge: number;
+  bottomEdge: number;
+  navHeight: number;
+  navY: number;
+  contentTop: number;
+  contentBottom: number;
+  contentH: number;
+}
+
+/**
+ * 动态全屏布局计算（适配 16:9 ~ 21:9 全面屏）：
+ * 底部导航栏紧贴屏幕底边，顶部内容贴近屏幕顶边，彻底消除上下留空。
+ */
+export function getScreenLayout(): ScreenLayout {
+  const visH = Math.max(1334, Math.round(view.getVisibleSize().height || 1334));
+  const halfH = visH / 2;
+  const navHeight = 132;
+  const bottomEdge = -halfH;
+  const topEdge = halfH;
+  const navY = bottomEdge + navHeight / 2;
+  const contentBottom = bottomEdge + navHeight + 8;
+  const contentTop = topEdge - 14;
+  return {
+    visH,
+    halfH,
+    topEdge,
+    bottomEdge,
+    navHeight,
+    navY,
+    contentTop,
+    contentBottom,
+    contentH: contentTop - contentBottom,
+  };
+}
+
 export function createModalOverlay(parent: Node, alpha = 190): Node {
-  const mask = createUINode('ModalMask', 750, 1750, parent, 0, 0);
-  drawRoundedBox(mask, 750, 1750, '#090710', alpha, 0);
+  const h = Math.max(1850, getScreenLayout().visH + 100);
+  const mask = createUINode('ModalMask', 750, h, parent, 0, 0);
+  drawRoundedBox(mask, 750, h, '#090710', alpha, 0);
   mask.addComponent(BlockInputEvents);
   return mask;
 }
@@ -681,15 +721,17 @@ export function playFadeFromBlack(root: Node, time = 0.3): void {
   tween(op).to(time, { opacity: 0 }).call(() => { if (cover.isValid) cover.destroy(); }).start();
 }
 
-// 全屏统一 Q 版暖木流云底部导航栏（y = -595，严格处于750x1334安全区内）
+// 全屏统一 Q 版暖木流云底部导航栏（动态紧贴屏幕最底边，消除底部留白）
 export function renderBottomNavBar(
   parent: Node,
   active: 'shop' | 'lord' | 'hall' | 'hero' | 'base',
   onSwitch: (tab: 'shop' | 'lord' | 'hall' | 'hero' | 'base') => void,
   badges?: Partial<Record<'shop' | 'lord' | 'hall' | 'hero' | 'base', boolean>>
 ): void {
-  const bar = createUINode('BottomNavBar', 750, 118, parent, 0, -595);
-  drawRoundedBox(bar, 750, 118, '#281C15', 250, 0, '#D4A548', 2);
+  const layout = getScreenLayout();
+  const barH = layout.navHeight;
+  const bar = createUINode('BottomNavBar', 750, barH, parent, 0, layout.navY);
+  drawRoundedBox(bar, 750, barH, '#281C15', 252, 0, '#D4A548', 2);
 
   const items: { key: 'shop' | 'lord' | 'hall' | 'hero' | 'base'; label: string; icon: string; fallbackIcon: string }[] = [
     { key: 'shop', label: '军需', icon: 'tab_q_shop', fallbackIcon: 'tab_shop' },
@@ -700,13 +742,13 @@ export function renderBottomNavBar(
   ];
 
   items.forEach((it, idx) => {
-    const x = -292 + idx * 146;
+    const x = -296 + idx * 148;
     const isAct = it.key === active;
-    const cell = createUINode(`Tab_${it.key}`, 136, 102, bar, x, isAct ? 4 : 0);
+    const cell = createUINode(`Tab_${it.key}`, 142, 114, bar, x, isAct ? 4 : 0);
     if (isAct) {
-      const hiBg = createUINode('HiBg', 136, 102, cell, 0, 0);
-      if (!ArtAssetManager.skinCloudPanel(hiBg, 136, 102)) {
-        drawRoundedBox(hiBg, 136, 102, '#5C3D1E', 248, 16, '#FFD54F', 2);
+      const hiBg = createUINode('HiBg', 142, 114, cell, 0, 0);
+      if (!ArtAssetManager.skinCloudPanel(hiBg, 142, 114)) {
+        drawRoundedBox(hiBg, 142, 114, '#5C3D1E', 248, 16, '#FFD54F', 2);
       } else {
         const sp = hiBg.getChildByName('Sp_ui_panel_cloud')?.getComponent(Sprite);
         if (sp) sp.color = new Color(255, 224, 150, 255);
@@ -715,7 +757,7 @@ export function renderBottomNavBar(
       op.opacity = 160;
       tween(op).to(0.18, { opacity: 255 }).start();
     } else {
-      drawRoundedBox(cell, 128, 92, '#35251C', 220, 14, '#705236', 1);
+      drawRoundedBox(cell, 134, 104, '#35251C', 225, 14, '#705236', 1.5);
     }
     const btn = cell.addComponent(Button);
     btn.transition = Button.Transition.NONE;
@@ -725,15 +767,15 @@ export function renderBottomNavBar(
       onSwitch(it.key);
     });
     const iconKey = ArtAssetManager.has(it.icon) ? it.icon : it.fallbackIcon;
-    const iconSp = ArtAssetManager.createSpriteNode(cell, iconKey, 48, 48, 0, 14);
+    const iconSp = ArtAssetManager.createSpriteNode(cell, iconKey, 56, 56, 0, 16);
     if (iconSp && isAct) {
       iconSp.setScale(1, 1, 1);
-      tween(iconSp).to(0.18, { scale: new Vec3(1.16, 1.16, 1), position: new Vec3(0, 20, 0) }, { easing: 'backOut' }).start();
+      tween(iconSp).to(0.18, { scale: new Vec3(1.16, 1.16, 1), position: new Vec3(0, 22, 0) }, { easing: 'backOut' }).start();
     }
-    createLabel(cell, it.label, isAct ? 21 : 19, isAct ? '#FFE57F' : '#EFE0CE', 0, -28, 120, 26, true);
+    createLabel(cell, it.label, isAct ? 25 : 22, isAct ? '#FFE57F' : '#EFE0CE', 0, -32, 130, 30, true);
     if (badges && badges[it.key] && !isAct) {
-      const dot = createUINode('TabDot', 15, 15, cell, 46, 36);
-      drawRoundedBox(dot, 15, 15, '#E53935', 255, 7, '#FFD54F', 1);
+      const dot = createUINode('TabDot', 16, 16, cell, 48, 40);
+      drawRoundedBox(dot, 16, 16, '#E53935', 255, 8, '#FFD54F', 1);
       attachIdleBreath(dot, { mode: BreathMode.Swing, amp: 10, period: 0.6, interval: 3, randomDelay: idx * 0.5 });
     }
   });

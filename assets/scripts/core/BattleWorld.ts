@@ -526,10 +526,10 @@ export class BattleWorld {
     }
     const scale = this.phase === 'DEPLOY_PICK' ? 0.05 : this.userSpeed;
     this.timeScale = scale;
-    this.accumulator += dt * scale;
+    this.accumulator = Math.min(this.accumulator + dt * scale, FIXED_DT * 24);
 
     let guard = 0;
-    while (this.accumulator >= FIXED_DT && guard < 10) {
+    while (this.accumulator >= FIXED_DT && guard < 24) {
       this.accumulator -= FIXED_DT;
       this.fixedTick(FIXED_DT);
       guard++;
@@ -1483,7 +1483,8 @@ export class BattleWorld {
           this.damageWall(m.config.wallDmg);
         }
 
-        const expGain = RUN_CONFIG.expByRole[roleType] ?? m.config.exp;
+        const baseExp = RUN_CONFIG.expByRole[roleType] ?? m.config.exp;
+        const expGain = baseExp * RUN_CONFIG.monsterExpScale;
         this.events.emit('enemy_killed', {
           uid: m.uid,
           monsterId: m.config.id,
@@ -1536,10 +1537,10 @@ export class BattleWorld {
   }
 
   private gainBattleExp(exp: number): void {
-    const gained = Math.max(1, Math.round(exp * (1 + (this.lordBonus.expGainPct || 0) / 100)));
+    const gained = Math.max(0, exp * (1 + (this.lordBonus.expGainPct || 0) / 100));
     this.battleExp += gained;
-    while (this.battleExp >= this.expNeeded) {
-      this.battleExp -= this.expNeeded;
+    while (this.battleExp + 1e-6 >= this.expNeeded) {
+      this.battleExp = Math.max(0, this.battleExp - this.expNeeded);
       this.battleLevel++;
       this.expNeeded = getExpToNextLevel(this.battleLevel);
       this.pendingLevelUps++;

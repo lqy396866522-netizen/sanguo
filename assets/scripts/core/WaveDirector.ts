@@ -46,11 +46,15 @@ export class WaveDirector {
     this.stageHpScale = stageHpScale;
     this.bus = bus;
 
+    const mult = RUN_CONFIG.monsterSwarmMult || 1;
     let total = 0;
     for (const w of waves) {
-      total += w.count;
+      total += w.count * mult;
       if (w.special) {
-        for (const sp of w.special) total += sp.count;
+        for (const sp of w.special) {
+          const spMult = sp.type === 'boss' || sp.type === 'elite' ? 1 : mult;
+          total += sp.count * spMult;
+        }
       }
     }
     this.totalSpawnCount = total;
@@ -70,20 +74,23 @@ export class WaveDirector {
 
   private buildWaveQueue(wave: RunWaveDef): ScheduledSpawn[] {
     const dur = Math.max(4, wave.end - wave.start);
+    const mult = RUN_CONFIG.monsterSwarmMult || 1;
     const waveHpScale = this.stageHpScale * (1 + RUN_CONFIG.hpScalePerWave * (wave.id - 1)) * (wave.hpMult ?? 1);
     const list: ScheduledSpawn[] = [];
 
-    // 1. 若有簇，在波次前 1/3 集中刷出，强化 AOE 清屏爽感
+    // 1. 若有簇，在波次前 1/3 集中刷出，强化 AOE 清屏爽感（数量 × mult，间隔同比例压缩）
     const clusters = wave.clusters || [];
     let clusterTotal = 0;
     const clusterStartBase = Math.min(1.0, dur * 0.08);
     const clusterWindow = Math.max(1.5, dur * 0.28);
-    clusters.forEach((cCount, ci) => {
+    const clusterGap = 0.14 / mult;
+    clusters.forEach((rawCount, ci) => {
+      const cCount = rawCount * mult;
       const cStart = clusterStartBase + (clusters.length > 1 ? (ci / clusters.length) * clusterWindow : 0);
       for (let i = 0; i < cCount; i++) {
         list.push({
           waveId: wave.id,
-          time: cStart + i * 0.14,
+          time: cStart + i * clusterGap,
           monsterId: this.resolveMonsterId('normal'),
           roleType: 'normal',
           hpScale: waveHpScale,
@@ -95,7 +102,7 @@ export class WaveDirector {
     });
 
     // 2. 剩余小兵均匀流式刷出（避开波尾最后 1.2s，留出收尾空间）
-    const streamCount = Math.max(0, wave.count - clusterTotal);
+    const streamCount = Math.max(0, wave.count * mult - clusterTotal);
     const streamDur = Math.max(1.5, dur - 1.5);
     for (let i = 0; i < streamCount; i++) {
       const ratio = streamCount > 1 ? i / (streamCount - 1) : 0.15;
@@ -110,12 +117,14 @@ export class WaveDirector {
       });
     }
 
-    // 3. 节点波特殊敌人（40%~50% 处登场；Boss 在 W20 的 30% 即约第 235s 登场）
+    // 3. 节点波特殊敌人（精英与 Boss 保持原数量，盾兵/骑兵/军医数量 × mult）
     if (wave.special) {
       for (const sp of wave.special) {
         const baseT = dur * sp.at;
-        const gap = sp.type === 'boss' ? 0 : sp.type === 'elite' ? 1.2 : 0.42;
-        for (let i = 0; i < sp.count; i++) {
+        const spMult = sp.type === 'boss' || sp.type === 'elite' ? 1 : mult;
+        const spCount = sp.count * spMult;
+        const gap = sp.type === 'boss' ? 0 : sp.type === 'elite' ? 1.2 : 0.42 / spMult;
+        for (let i = 0; i < spCount; i++) {
           list.push({
             waveId: wave.id,
             time: baseT + i * gap,
@@ -204,11 +213,15 @@ export class WaveDirector {
   public jumpToWave(targetWaveId: number, elapsed: number): void {
     const idx = Math.max(0, Math.min(this.waves.length - 1, targetWaveId - 1));
     // 将跳过的波次计数补齐，保证进度条同步
+    const mult = RUN_CONFIG.monsterSwarmMult || 1;
     let skipped = 0;
     for (let i = 0; i < idx; i++) {
-      skipped += this.waves[i].count;
+      skipped += this.waves[i].count * mult;
       if (this.waves[i].special) {
-        for (const sp of this.waves[i].special!) skipped += sp.count;
+        for (const sp of this.waves[i].special!) {
+          const spMult = sp.type === 'boss' || sp.type === 'elite' ? 1 : mult;
+          skipped += sp.count * spMult;
+        }
       }
     }
     this.spawnedCount = Math.max(this.spawnedCount, skipped);
