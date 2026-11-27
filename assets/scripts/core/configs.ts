@@ -76,13 +76,13 @@ export function expNeededForLevel(level: number): number {
 }
 
 export const LORD_SKILLS: LordSkillConfig[] = [
-  { id: 'LS_MULTI',  name: '号令齐射', desc: '全军武将普攻伤害提升 +18%，并有概率触发连击', maxLevel: 4, tag: '号令' },
-  { id: 'LS_PIERCE', name: '破甲军令', desc: '全军武将无视敌军 15% 抗性，弹道穿透 +1', maxLevel: 4, tag: '破甲' },
-  { id: 'LS_SPEED',  name: '急行军令', desc: '全军武将攻击速度提升 +16%', maxLevel: 4, tag: '攻速' },
-  { id: 'LS_FIRE',   name: '火箭军令', desc: '全军攻击附加 15% 火焰灼烧伤害，克制藤甲', maxLevel: 3, tag: '火攻' },
-  { id: 'LS_THUNDER',name: '雷策军令', desc: '全军命中概率引动落雷并麻痹敌人 0.5 秒', maxLevel: 3, tag: '雷策' },
-  { id: 'LS_CRIT',   name: '弱点洞察', desc: '全军暴击率 +10%，暴击伤害 +25%', maxLevel: 3, tag: '暴击' },
-  { id: 'LS_WALL',   name: '城防固守', desc: '立即回复 20% 城防血量，并提升 10% 城防减伤', maxLevel: 3, tag: '城防' },
+  { id: 'LS_MULTI',  name: '军策·齐射', desc: '全军武将普攻伤害提升 +18%，并有概率触发连击', maxLevel: 4, tag: '军策' },
+  { id: 'LS_PIERCE', name: '军策·破甲', desc: '全军武将无视敌军 15% 抗性，弹道穿透 +1', maxLevel: 4, tag: '军策' },
+  { id: 'LS_SPEED',  name: '军策·急行', desc: '全军武将攻击速度提升 +16%', maxLevel: 4, tag: '军策' },
+  { id: 'LS_FIRE',   name: '军策·火矢', desc: '全军攻击附加 15% 火焰灼烧伤害，克制藤甲', maxLevel: 3, tag: '军策' },
+  { id: 'LS_THUNDER',name: '军策·雷策', desc: '全军命中概率引动落雷并麻痹敌人 0.5 秒', maxLevel: 3, tag: '军策' },
+  { id: 'LS_CRIT',   name: '军策·洞察', desc: '全军暴击率 +10%，暴击伤害 +25%', maxLevel: 3, tag: '军策' },
+  { id: 'LS_WALL',   name: '军策·固守', desc: '立即回复 20% 城防血量，并提升 10% 城防减伤', maxLevel: 3, tag: '城防' },
 ];
 
 export const HERO_CONFIGS: HeroConfig[] = [

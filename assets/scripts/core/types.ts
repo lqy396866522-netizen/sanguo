@@ -88,7 +88,7 @@ export interface SlotPos {
   x: number;
   y: number;
   tag: 'front' | 'mid' | 'back';
-  slotType?: 'normal' | 'corner' | 'highland' | 'front' | 'support';
+  slotType?: 'normal' | 'highland' | 'gate' | 'support';
 }
 
 export interface WaveConfig {
@@ -242,13 +242,16 @@ export interface BattleReport {
 
 export interface RogueCard {
   uid: string;
-  type: 'NEW_HERO' | 'LORD_SKILL' | 'HERO_AFFIX';
+  type: 'NEW_HERO' | 'LORD_SKILL' | 'HERO_AFFIX' | 'LORD_CMD' | 'HERO_EVO';
   title: string;
   desc: string;
   heroId?: string;
   affixId?: string;
   lordSkillId?: string;
-  tags: string[]; // ['新', '可对空', '近战', '无双']
+  cmdId?: string;
+  evoName?: string;
+  bondHint?: string; // 如 "五虎上将 2/4→3/4"
+  tags: string[]; // ['新', '可对空', '近战', '进化', '军令']
   isSuperWeapon?: boolean;
   rarity?: 'white' | 'blue' | 'purple' | 'gold';
 }
@@ -276,7 +279,14 @@ export interface BattleVfxEvent {
     | 'wooden_ox_boom'
     | 'poison_swamp'
     | 'hit_spark'
-    | 'ice_arrows';
+    | 'ice_arrows'
+    | 'cmd_arrow'
+    | 'cmd_fire'
+    | 'cmd_drum'
+    | 'cmd_rally'
+    | 'cmd_log'
+    | 'musou_slash'
+    | 'hero_evolve';
   x: number;
   y: number;
   tx?: number;

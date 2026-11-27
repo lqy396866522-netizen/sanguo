@@ -16,9 +16,10 @@ class MemRepo {
   saveProfile(d) { this.raw = JSON.parse(JSON.stringify(d)); }
 }
 
-test('S1-1. 20波配置与预埋SLOTS结构、节点波事件完整性', () => {
+test('S1-1. 20波配置与固定带类型SLOTS结构、节点波事件完整性', () => {
   assert.equal(RUN_CONFIG.waves.length, 20, '应为 20 波配置');
-  assert.ok(SLOTS.length >= 8 && SLOTS.every((s) => s.slotType === 'normal'), '预埋 SLOTS 应为 normal 类型');
+  const validTypes = new Set(['normal', 'highland', 'gate', 'support']);
+  assert.ok(SLOTS.length >= 8 && SLOTS.every((s) => validTypes.has(s.slotType)), 'SLOTS 应包含有效的 4 类固定坑位类型');
 
   const mgr = new PlayerDataManager(new MemRepo());
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 2026 });
@@ -82,6 +83,7 @@ test('S1-3. 盾兵减伤区分（普通-40% vs AOE/穿透-20%）、军医范围�
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 42 });
   world.selectRogueCard(0);
   world.autoPlacePendingHero();
+  if (world.phase === 'ROGUE_CHOICE') world.selectRogueCard(0);
 
   const wounded = world.spawnMonster('M_INFANTRY', 0, 1, { x: 300, y: 900 }, false);
   const medic = world.spawnMonster('M_MEDIC', 0, 1, { x: 340, y: 900 }, false);
@@ -107,6 +109,7 @@ test('S1-4. 城墙血量<30% 触发唯一一次绝境三选一（援军/冰冻/�
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 77 });
   world.selectRogueCard(0);
   world.autoPlacePendingHero();
+  if (world.phase === 'ROGUE_CHOICE') world.selectRogueCard(0);
 
   let crisisCount = 0;
   world.events.on('crisis_triggered', () => crisisCount++);
@@ -130,6 +133,7 @@ test('S1-4. 城墙血量<30% 触发唯一一次绝境三选一（援军/冰冻/�
   const w2 = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 78 });
   w2.selectRogueCard(0);
   w2.autoPlacePendingHero();
+  if (w2.phase === 'ROGUE_CHOICE') w2.selectRogueCard(0);
   w2.debugDamageWallTo(0.25);
   const lowHp = w2.wallHp;
   w2.selectCrisisOption(2);
@@ -164,6 +168,7 @@ test('S1-6. 指数血量缩放、杂兵无护体、入口冲锋护体25%渐退�
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 99 });
   world.selectRogueCard(0);
   world.autoPlacePendingHero();
+  if (world.phase === 'ROGUE_CHOICE') world.selectRogueCard(0);
 
   // 校验 WaveDirector 总刷怪数与 20 波表精确一致
   let expectedTotal = 0;
@@ -199,6 +204,7 @@ test('S1-7. Boss 三阶段（70%护盾+召兵+AOE免疫 / 35%狂暴）与首发�
   const world = new BattleWorld(1, mgr.profile.heroes, mgr.getLordBattleBonus(), { seed: 123 });
   world.selectRogueCard(0);
   world.autoPlacePendingHero();
+  if (world.phase === 'ROGUE_CHOICE') world.selectRogueCard(0);
 
   const boss = world.spawnMonster('BOSS_ZHANGBO', 0, 1, { x: 375, y: 700 }, false, { waveId: 20, waveKind: 'boss', overrideMaxHp: 10000 });
   assert.ok(boss);

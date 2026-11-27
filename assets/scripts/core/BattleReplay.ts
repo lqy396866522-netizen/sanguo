@@ -32,6 +32,9 @@ function applyOp(w: BattleWorld, op: BattleOp): void {
     case 'autoPlace': w.autoPlacePendingHero(); break;
     case 'move': w.moveHeroTo(op.h, op.x, op.y); break;
     case 'auto': w.setAutoMode(op.v); break;
+    case 'crisis': w.selectCrisisOption(op.i); break;
+    case 'cmd': w.castLordCommand(op.slot, op.x, op.y, op.m); break;
+    case 'musou': w.castMusou(op.m); break;
     case 'revive': w.reviveWall(); break;
     case 'defeat': w.confirmDefeat(); break;
   }

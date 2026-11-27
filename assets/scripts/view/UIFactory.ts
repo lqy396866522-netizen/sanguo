@@ -30,7 +30,12 @@ import {
   FxPool,
   HitFlash,
   FxTag,
+  ConfettiLayer,
+  playBezierFly,
+  createHexBadge,
+  playBadgeDrop,
 } from '../fx';
+import type { BadgeDropOpts } from '../fx';
 
 const AFFIX_NAME_MAP: Record<string, string> = {
   atk_pct: '攻击力',
@@ -498,38 +503,83 @@ export function playShakeDeny(node: Node): void {
     .start();
 }
 
-// 道具飞行到资源条（基于 FxPool 对象池）
+// 道具沿二次贝塞尔曲线错峰飞入资源条（基于 FxPool 对象池，兼容旧调用并支持分步回调与胶囊脉冲）
 export function playFlyIcons(
+  layer: Node,
+  fromLocalPos: Vec3,
+  toLocalPos: Vec3,
+  count = 10,
+  spriteKey?: string,
+  colorHex = '#FFD54F',
+  onArrive?: () => void,
+  onEachArrive?: (idx: number, total: number) => void,
+  targetBumpNode?: Node | null
+): void {
+  const sf = spriteKey ? ArtAssetManager.getSpriteFrame(spriteKey) : null;
+  playBezierFly({
+    layer,
+    from: fromLocalPos,
+    to: toLocalPos,
+    count,
+    spriteFrame: sf || undefined,
+    size: sf ? 30 : 16,
+    color: hexToColor(colorHex, 255),
+    mode: 'collect',
+    onEachArrive: (idx, total) => {
+      if (targetBumpNode && targetBumpNode.isValid) {
+        playTickPop(targetBumpNode, 1.12);
+      }
+      onEachArrive?.(idx, total);
+    },
+    onAllArrive: onArrive,
+  });
+}
+
+// 逆向消耗短飞行（如顶栏粮草 → 出征按钮，0.45s 内完成）
+export function playConsumeFly(
   layer: Node,
   fromLocalPos: Vec3,
   toLocalPos: Vec3,
   count = 5,
   spriteKey?: string,
-  colorHex = '#FFD54F',
-  onArrive?: () => void
+  colorHex = '#AED581',
+  onArrive?: () => void,
+  targetBumpNode?: Node | null
 ): void {
   const sf = spriteKey ? ArtAssetManager.getSpriteFrame(spriteKey) : null;
-  for (let i = 0; i < count; i++) {
-    const dot = FxPool.acquire(layer, {
-      spriteFrame: sf || undefined,
-      size: sf ? 28 : 16,
-      color: hexToColor(colorHex, 255),
-    });
-    const sx = fromLocalPos.x + (Math.random() - 0.5) * 40;
-    const sy = fromLocalPos.y + (Math.random() - 0.5) * 24;
-    dot.setPosition(sx, sy, 0);
-    dot.setScale(0.5, 0.5, 1);
-    tween(dot)
-      .delay(i * 0.045)
-      .to(0.12, { scale: new Vec3(1.15, 1.15, 1) }, { easing: 'backOut' })
-      .to(0.38, { position: toLocalPos.clone(), scale: new Vec3(0.7, 0.7, 1) }, { easing: 'quadIn' })
-      .call(() => {
-        FxPool.release(dot);
-        if (i === count - 1 && onArrive) onArrive();
-      })
-      .start();
-  }
+  playBezierFly({
+    layer,
+    from: fromLocalPos,
+    to: toLocalPos,
+    count,
+    spriteFrame: sf || undefined,
+    size: sf ? 28 : 16,
+    color: hexToColor(colorHex, 255),
+    mode: 'consume',
+    duration: 0.3,
+    stagger: 0.028,
+    onEachArrive: (idx, total) => {
+      if (idx === total - 1 && targetBumpNode && targetBumpNode.isValid) {
+        playTickPop(targetBumpNode, 1.1);
+      }
+    },
+    onAllArrive: onArrive,
+  });
 }
+
+// 60fps 交互彩纸屑喷发（单 Graphics 批绘，上限 100 片）
+export function playConfettiBurst(
+  parent: Node,
+  localPos: Vec3,
+  count = 55,
+  palette?: string[]
+): void {
+  ConfettiLayer.burst(parent, localPos, count, palette);
+}
+
+// 导出六边形徽章绘制与伪 3D 掉落交互
+export { createHexBadge, playBadgeDrop };
+export type { BadgeDropOpts };
 
 // 迸发火花/星星粒子（基于 FxPool 对象池；有 fx_dot 时用 ADD 发光光点）
 export function playBurstParticles(

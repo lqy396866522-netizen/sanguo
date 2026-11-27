@@ -47,6 +47,7 @@ import {
   hexToColor,
   playBurstParticles,
   playChestOpen,
+  playConfettiBurst,
   playFadeFromBlack,
   playFlyIcons,
   playPopBounce,
@@ -228,12 +229,18 @@ export class GameApp extends Component {
       { x: 236, icon: ArtAssetManager.has('icon_stamina_bag') ? 'icon_stamina_bag' : 'icon_stamina', prefix: '粮草 ', val: p.stamina, suffix: `/${p.maxStamina}`, col: '#A5D6A7' },
     ];
     const rollFns: (() => void)[] = [];
+    let goldPillNode: Node | null = null;
+    let goldRoll: ReturnType<typeof attachNumberRoll> | null = null;
     capSpecs.forEach((c) => {
       const pill = createUINode('CapPill', 224, currH - 2, caps, c.x, 0);
       drawRoundedBox(pill, 224, currH - 2, '#1D120E', 230, 24, '#C89B42', 2);
       ArtAssetManager.createSpriteNode(pill, c.icon, 34, 34, -80, 0);
       const lbl = createLabel(pill, `${c.prefix}${c.val}${c.suffix}`, 22, c.col, 18, 0, 154, 32, true);
       const nr = attachNumberRoll(lbl.node, c.val, { prefix: c.prefix, suffix: c.suffix, tintOnIncrease: true });
+      if (c.prefix.startsWith('铜钱')) {
+        goldPillNode = pill;
+        goldRoll = nr;
+      }
       rollFns.push(() => {
         const cur = c.prefix.startsWith('元宝') ? p.diamond : c.prefix.startsWith('铜钱') ? p.gold : p.stamina;
         nr.rollTo(cur);
@@ -275,18 +282,34 @@ export class GameApp extends Component {
         showToast(this.viewRoot, '今日已领取');
         return;
       }
+      const oldGold = this.dataMgr.profile.gold;
       this.dataMgr.profile.gold += 500;
       this.dataMgr.profile.forgeStone += 5;
       this.dataMgr.save();
       AudioManager.playSfx('sfx_coin');
       const chestPos = new Vec3(-302, freeCardY, 0);
       const onOpen = () => {
-        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, currBarY, 0), 5, 'icon_coin_s', '#FFD54F', rollResources);
-        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, currBarY, 0), 3, 'icon_forge_ore', '#FF7043');
+        playConfettiBurst(this.viewRoot, chestPos, 36);
+        playFlyIcons(
+          this.viewRoot,
+          chestPos,
+          new Vec3(0, currBarY, 0),
+          12,
+          'icon_coin_s',
+          '#FFD54F',
+          () => {
+            rollResources();
+            if (this.viewRoot.isValid && this.currentTab === 'shop') this.openTab('shop');
+          },
+          (idx, total) => {
+            goldRoll?.rollTo(oldGold + Math.round((500 * (idx + 1)) / total));
+          },
+          goldPillNode
+        );
+        playFlyIcons(this.viewRoot, chestPos, new Vec3(0, currBarY, 0), 4, 'icon_forge_ore', '#FF7043');
         FloatText.show(this.viewRoot, freeCard.worldPosition, '+500铜钱 +5锻造石', FloatStyle.gold);
         chestBtn.label.string = '已领取';
         showToast(this.viewRoot, '获得 铜钱×500 锻造石×5');
-        tween(this.viewRoot).delay(0.9).call(() => this.openTab('shop')).start();
       };
       if (freeChestSp) playChestOpen(freeChestSp, this.viewRoot, chestPos, onOpen);
       else onOpen();

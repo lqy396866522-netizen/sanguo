@@ -55,6 +55,34 @@ export interface BattleEventMap {
     x: number;
     y: number;
   };
+  rage_changed: {
+    rage: number;
+    maxRage: number;
+  };
+  command_cast: {
+    cmdId: string;
+    name: string;
+    manual: boolean;
+    x: number;
+    y: number;
+  };
+  musou_cast: {
+    manual: boolean;
+    dominantBondId: string | null;
+    hitCount: number;
+  };
+  bond_changed: {
+    bondId: string;
+    name: string;
+    tierNeed: number;
+    memberIds: string[];
+    upgraded: boolean;
+  };
+  hero_evolved: {
+    heroId: string;
+    heroName: string;
+    evoName: string;
+  };
 }
 
 type Handler<T> = (payload: T) => void;

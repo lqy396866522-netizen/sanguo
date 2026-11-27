@@ -32,8 +32,26 @@ import {
   getWaveHpScale,
   RUN_CONFIG,
   type EnemyRoleType,
+  type SlotType,
   type WaveKind,
 } from './RunConfig.ts';
+import { PathTrack } from './PathTrack.ts';
+import { StatBlock, type Modifier } from './StatBlock.ts';
+import {
+  buildFixedSlotsForStage,
+  evalBonds,
+  EVOLUTION_CONFIGS,
+  GATE_END_DMG_BONUS,
+  GATE_END_PATH_RATIO,
+  getLordCommandConfig,
+  HERO_PHASE2_META,
+  MANUAL_CAST_BONUS,
+  MAX_LORD_CMD_SLOTS,
+  MUSOU_CONFIG,
+  SLOT_SWAP_PREP_SEC,
+  SUPPORT_AURA_RADIUS,
+  type ActiveBondState,
+} from './Phase2BattleConfigs.ts';
 
 export const FIXED_DT = 1 / 30;
 export const WALL_Y = 265;
@@ -85,6 +103,8 @@ export type BattleOp =
   | { t: number; k: 'move'; h: string; x: number; y: number }
   | { t: number; k: 'auto'; v: boolean }
   | { t: number; k: 'crisis'; i: 0 | 1 | 2 }
+  | { t: number; k: 'cmd'; slot: number; x: number; y: number; m: boolean }
+  | { t: number; k: 'musou'; m: boolean }
   | { t: number; k: 'revive' }
   | { t: number; k: 'defeat' };
 
@@ -151,16 +171,34 @@ export interface DeployedHero {
   heroId: string;
   config: HeroConfig;
   slotId?: number;
+  slotType: SlotType;
+  stats: StatBlock;
   x: number;
   y: number;
   cooldown: number;
   maxCooldown: number;
+  prepTimer: number;
+  roarCooldown: number;
   attackCount: number;
   specialTimer: number;
   attackAnimTimer: number;
   affixStacks: Record<string, number>;
   killBonusPct: number;
+  evolved: boolean;
+  evoName?: string;
 }
+
+export interface LordCommandSlot {
+  cmdId: string;
+  level: number;
+  cooldown: number;
+  maxCooldown: number;
+}
+
+export type ActiveCommandEffect =
+  | { kind: 'arrow'; x: number; y: number; radius: number; remain: number; tickTimer: number; dmgPerTick: number }
+  | { kind: 'fire_road'; pathIndex: number; sStart: number; sEnd: number; remain: number; tickTimer: number; dmgPerTick: number }
+  | { kind: 'log'; pathIndex: number; sCur: number; sEnd: number; speed: number; dmg: number; hitUids: Set<number> };
 
 export interface GroundZone {
   id: number;
@@ -259,6 +297,27 @@ export class BattleWorld {
   public lordAttackAnimTimer = 0;
   public lordSkillLevels: Record<string, number> = {};
 
+  // 第 2 阶段：主动军令、怒气无双、羁绊、进化与 PathTrack
+  public lordCommands: LordCommandSlot[] = [];
+  public activeCmdEffects: ActiveCommandEffect[] = [];
+  public drumSlowTimer = 0;
+  public rage = 0;
+  public readonly maxRage = MUSOU_CONFIG.maxRage;
+  public musouActiveTimer = 0;
+  public activeBonds: ActiveBondState[] = [];
+  public evolvedHeroes: Set<string> = new Set();
+  public openingCommandPending = true;
+  public currentChoiceIsOpeningCommand = false;
+  public noHeroChoicesStreak = 0;
+  public cmdCastCount = 0;
+  public cmdManualCount = 0;
+  public musouCastCount = 0;
+  public musouManualCount = 0;
+  public pathTracks: PathTrack[] = [];
+  private wallRageWindowTimer = 0;
+  private wallRageThisSec = 0;
+  private autoCmdCheckTimer = 0;
+
   public monsters: MonsterUnit[] = [];
   public bullets: BulletProj[] = [];
   public zones: GroundZone[] = [];
@@ -351,17 +410,19 @@ export class BattleWorld {
     this.expNeeded = getExpToNextLevel(1);
 
     this.combo = new ComboSystem(this.events);
-    this.pathLengths = this.stage.paths.map((path) => {
-      let total = 0;
-      for (let i = 0; i < path.length - 1; i++) {
-        total += Math.hypot(path[i + 1].x - path[i].x, path[i + 1].y - path[i].y);
-      }
-      return Math.max(1, total);
-    });
+    this.pathTracks = this.stage.paths.map((path) => new PathTrack(path));
+    this.pathLengths = this.pathTracks.map((tr) => tr.totalLen);
     const stageHpScale = this.stage.waves[0]?.hpScale || 1;
     this.waveDirector = new WaveDirector(this.stage.bossId, stageHpScale, this.events);
 
-    this.generateRandomSuggestedSlots();
+    // 订阅连斩里程碑充能怒气（§5.1）
+    this.events.on('combo_milestone', (ev) => {
+      const gain = MUSOU_CONFIG.rageComboMilestones[ev.combo] || 0;
+      if (gain > 0) this.addRage(gain);
+    });
+
+    // 第 2 阶段：每关固定 8~9 带类型预设坑位（硬吸附）
+    this.suggestedSlots = buildFixedSlotsForStage(this.stage);
 
     for (const w of this.stage.waves) {
       this.waveSpawnState.push({
@@ -415,62 +476,22 @@ export class BattleWorld {
     });
   }
 
-  // 基于当前关卡道路走向均匀生成 8 个黄金坑位（覆盖上/中/下关键拐角，避开左右HUD栏）
-  private generateRandomSuggestedSlots(): void {
-    const candidates: { x: number; y: number; dist: number; score: number }[] = [];
-    for (let x = 155; x <= 585; x += 48) {
-      for (let y = 415; y <= 985; y += 54) {
-        const d = this.minDistToPaths(x, y);
-        if (d >= 58 && d <= 98) {
-          // 优先贴近道路拐角附近（能覆盖多段路径）且远离边缘
-          const edgePenalty = Math.abs(x - 370) * 0.04;
-          const idealDist = Math.abs(d - 74);
-          candidates.push({ x, y, dist: d, score: idealDist + edgePenalty + this.rng() * 14 });
-        }
+  /** 硬吸附查找距离 (x, y) 最近且空闲的固定预设坑位（半径 <= 72px） */
+  public findFreeSlotNear(x: number, y: number, ignoreHeroId?: string, maxDist = 72): SlotPos | null {
+    let best: SlotPos | null = null;
+    let bestD = Infinity;
+    for (const s of this.suggestedSlots) {
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d > maxDist || d >= bestD) continue;
+      const occupied = Array.from(this.deployedHeroes.values()).some(
+        (h) => (!ignoreHeroId || h.heroId !== ignoreHeroId) && (h.slotId === s.id || Math.hypot(h.x - s.x, h.y - s.y) < 30)
+      );
+      if (!occupied) {
+        best = s;
+        bestD = d;
       }
     }
-
-    candidates.sort((a, b) => a.score - b.score);
-
-    const picked: SlotPos[] = [];
-    // 分上/中/下三带各先选 2~3 个，确保全战场分布均衡而非扎堆角落
-    const bands: [number, number, number][] = [
-      [780, 990, 3],
-      [580, 779, 3],
-      [410, 579, 2],
-    ];
-    for (const [minY, maxY, quota] of bands) {
-      let added = 0;
-      for (const c of candidates) {
-        if (added >= quota) break;
-        if (c.y < minY || c.y > maxY) continue;
-        if (picked.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= 118)) {
-          const tag: SlotPos['tag'] = c.y >= 780 ? 'front' : c.y <= 579 ? 'back' : 'mid';
-          picked.push({ id: picked.length + 1, x: c.x, y: c.y, tag, slotType: 'normal' });
-          added++;
-        }
-      }
-    }
-
-    // 不足 8 个则全局补齐
-    for (const c of candidates) {
-      if (picked.length >= 8) break;
-      if (picked.every((p) => Math.hypot(p.x - c.x, p.y - c.y) >= 105)) {
-        const tag: SlotPos['tag'] = c.y >= 780 ? 'front' : c.y <= 579 ? 'back' : 'mid';
-        picked.push({ id: picked.length + 1, x: c.x, y: c.y, tag, slotType: 'normal' });
-      }
-    }
-
-    if (picked.length < 6) {
-      for (const fallback of this.stage.slots) {
-        if (picked.length >= 6) break;
-        if (this.minDistToPaths(fallback.x, fallback.y) >= 48 && picked.every((p) => Math.hypot(p.x - fallback.x, p.y - fallback.y) >= 85)) {
-          picked.push({ id: picked.length + 1, x: fallback.x, y: fallback.y, tag: fallback.tag, slotType: 'normal' });
-        }
-      }
-    }
-
-    this.suggestedSlots = picked;
+    return best;
   }
 
   /** 严格沿行军路径向起点方向击退怪物，物理杜绝离路抄近道 Bug */
@@ -515,20 +536,18 @@ export class BattleWorld {
     return minD;
   }
 
-  public isPositionValidForDeploy(x: number, y: number, ignoreHeroId?: string): { valid: boolean; reason?: string } {
+  public isPositionValidForDeploy(x: number, y: number, ignoreHeroId?: string): { valid: boolean; reason?: string; slot?: SlotPos } {
     if (x < 65 || x > 685 || y < 325 || y > 1085) {
       return { valid: false, reason: '超出战场布阵区域' };
     }
     if (this.minDistToPaths(x, y) < 46) {
       return { valid: false, reason: '不能放置在行军道路上' };
     }
-    for (const h of this.deployedHeroes.values()) {
-      if (ignoreHeroId && h.heroId === ignoreHeroId) continue;
-      if (Math.hypot(h.x - x, h.y - y) < 62) {
-        return { valid: false, reason: '与其他武将距离过近' };
-      }
+    const slot = this.findFreeSlotNear(x, y, ignoreHeroId, 72);
+    if (!slot) {
+      return { valid: false, reason: '请放置到空闲阵位上' };
     }
-    return { valid: true };
+    return { valid: true, slot };
   }
 
   // 只读：当前已开始刷怪的波次序号（读取 20 波 WaveDirector）
@@ -605,6 +624,16 @@ export class BattleWorld {
     if (this.swapCooldown > 0) this.swapCooldown = Math.max(0, this.swapCooldown - dt);
     if (this.lordAttackAnimTimer > 0) this.lordAttackAnimTimer = Math.max(0, this.lordAttackAnimTimer - dt);
     if (this.crisisCatchupTimer > 0) this.crisisCatchupTimer = Math.max(0, this.crisisCatchupTimer - dt);
+    if (this.drumSlowTimer > 0) this.drumSlowTimer = Math.max(0, this.drumSlowTimer - dt);
+    if (this.musouActiveTimer > 0) this.musouActiveTimer = Math.max(0, this.musouActiveTimer - dt);
+    this.wallRageWindowTimer += dt;
+    if (this.wallRageWindowTimer >= 1.0) {
+      this.wallRageWindowTimer -= 1.0;
+      this.wallRageThisSec = 0;
+    }
+    for (const slot of this.lordCommands) {
+      if (slot.cooldown > 0) slot.cooldown = Math.max(0, slot.cooldown - dt);
+    }
     if (this.nextChoiceDelay > 0) {
       this.nextChoiceDelay = Math.max(0, this.nextChoiceDelay - dt);
       if (this.nextChoiceDelay === 0 && this.phase === 'PLAYING' && (this.pendingLevelUps > 0 || this.pendingChestChoices > 0)) {
@@ -631,10 +660,12 @@ export class BattleWorld {
     // 4. 武将自动攻击
     this.updateHeroes(dt);
 
-    // 5. 弹道、地面区域、木牛流马
+    // 5. 弹道、地面区域、木牛流马、主公军令效果与自动军令/无双
     this.updateBullets(dt);
     this.updateZones(dt);
     this.updateOxen(dt);
+    this.updateCommandEffects(dt);
+    this.updateAutoCommandsAndMusou(dt);
 
     // 6. 怪物移动、状态效果与Boss技能
     this.updateMonsters(dt);
@@ -871,43 +902,47 @@ export class BattleWorld {
   }
 
   private updateHeroes(dt: number): void {
+    const now = this.elapsed;
+    const weapon = getWeaponConfig(this.lordBonus.weaponId);
+    const cmdMultiLv = this.lordSkillLevels['LS_MULTI'] || 0;
+    const cmdPierceLv = this.lordSkillLevels['LS_PIERCE'] || 0;
+    const cmdSpdLv = this.lordSkillLevels['LS_SPEED'] || 0;
+    const cmdCritLv = this.lordSkillLevels['LS_CRIT'] || 0;
+    const cmdFireLv = this.lordSkillLevels['LS_FIRE'] || 0;
+    const gemMulti = (this.lordBonus.gemEffects.lord_multishot || 0) + weapon.multishot;
+    const gemPierce = (this.lordBonus.gemEffects.lord_pierce || 0) + weapon.pierce;
+
     for (const [heroId, hero] of this.deployedHeroes.entries()) {
       if (hero.attackAnimTimer > 0) hero.attackAnimTimer = Math.max(0, hero.attackAnimTimer - dt);
+      if (hero.roarCooldown > 0) hero.roarCooldown = Math.max(0, hero.roarCooldown - dt);
+      if (hero.prepTimer > 0) {
+        hero.prepTimer = Math.max(0, hero.prepTimer - dt);
+        continue;
+      }
       if (this.lockedHeroes.has(heroId)) continue;
 
       const cfg = hero.config;
-      const outLv = this.heroSaves[hero.heroId]?.level || 1;
-      const outBonus = 0.05 * (outLv - 1);
-      const weapon = getWeaponConfig(this.lordBonus.weaponId);
-      const tal = this.lordBonus.talismanEffects;
-      const gemHeroBonus = (this.lordBonus.gemEffects.hero_dmg_pct || 0) / 100;
-      const gemBossBonus = (this.lordBonus.gemEffects.boss_dmg_pct || 0) / 100 + (tal?.bossDmgPct || 0) / 100;
-      const gemFireBonus = (this.lordBonus.gemEffects.fire_dmg_pct || 0) / 100;
-      const setBonus = (this.lordBonus.setDamageBonusPct || 0) / 100;
-      const talHeroBonus = (tal?.heroDmgPct || 0) / 100;
-      const cmdMultiLv = this.lordSkillLevels['LS_MULTI'] || 0;
-      const cmdPierceLv = this.lordSkillLevels['LS_PIERCE'] || 0;
-      const cmdSpdLv = this.lordSkillLevels['LS_SPEED'] || 0;
-      const cmdCritLv = this.lordSkillLevels['LS_CRIT'] || 0;
-      const cmdFireLv = this.lordSkillLevels['LS_FIRE'] || 0;
-      const gemMulti = (this.lordBonus.gemEffects.lord_multishot || 0) + weapon.multishot;
-      const gemPierce = (this.lordBonus.gemEffects.lord_pierce || 0) + weapon.pierce;
+      const st = hero.stats;
 
-      let spdMult = this.getAuraSpeedFactor(hero.x, hero.y)
-        * (1 + (this.lordBonus.gemEffects.hero_atk_speed || 0) / 100 + (tal?.heroAtkSpeedPct || 0) / 100 + 0.16 * cmdSpdLv);
+      let spdMult = st.get('atkSpeed', now)
+        * this.getAuraSpeedFactor(hero.x, hero.y)
+        * (1 + 0.16 * cmdSpdLv);
       if (hero.heroId === 'H01') spdMult *= 1 + 0.25 * (hero.affixStacks['H01_A2'] || 0);
       if (hero.heroId === 'H08' && hero.affixStacks['H08_A4']) spdMult *= 1.33;
 
-      let range = cfg.range;
+      let range = st.get('range', now);
       if (hero.heroId === 'H01' && hero.affixStacks['H01_A3']) range *= 1 + 0.3 * hero.affixStacks['H01_A3'];
       if (hero.heroId === 'H02' && hero.affixStacks['H02_A2']) range *= 1 + 0.15 * hero.affixStacks['H02_A2'];
+      if (hero.heroId === 'H02' && hero.evolved) range = 1400; // 黄忠进化：百步穿杨全图射程
       if (hero.heroId === 'H03' && hero.affixStacks['H03_A2']) range *= 1 + 0.25 * hero.affixStacks['H03_A2'];
-      if (hero.heroId === 'H08' && hero.affixStacks['H08_A2']) range = 260;
+      if (hero.heroId === 'H05' && hero.evolved) range *= 1.3;  // 诸葛亮进化：范围+30%
+      if (hero.heroId === 'H08' && hero.affixStacks['H08_A2']) range = Math.max(range, 260);
 
       hero.specialTimer += dt;
-      if (hero.heroId === 'H08' && hero.affixStacks['H08_SW'] && hero.specialTimer >= 5.0) {
+      if (hero.heroId === 'H08' && (hero.affixStacks['H08_SW'] || hero.evolved) && hero.specialTimer >= 5.0) {
         hero.specialTimer = 0;
-        this.castLuBuSuper(hero, outBonus, gemHeroBonus + setBonus + talHeroBonus, gemBossBonus);
+        const outLv = this.heroSaves[hero.heroId]?.level || 1;
+        this.castLuBuSuper(hero, 0.05 * (outLv - 1), 0, st.get('dmgVsBoss', now));
       }
       if (hero.heroId === 'H11' && hero.affixStacks['H11_A1'] && hero.specialTimer >= 8.0) {
         hero.specialTimer = 0;
@@ -917,8 +952,8 @@ export class BattleWorld {
           x: hero.x,
           y: hero.y,
           speed: 140,
-          damage: this.lordBonus.baseAtk * 2.2 * (1 + outBonus),
-          leaveOil: (hero.affixStacks['H11_A4'] || 0) > 0,
+          damage: st.get('atk', now) * 2.2,
+          leaveOil: (hero.affixStacks['H11_A4'] || 0) > 0 || hero.evolved,
           dead: false,
         });
       }
@@ -926,33 +961,47 @@ export class BattleWorld {
       hero.cooldown -= dt;
       if (hero.cooldown > 0) continue;
 
-      const canHitAir = cfg.canHitAir || (hero.heroId === 'H07' && !!hero.affixStacks['H07_SW']) || (hero.heroId === 'H08' && !!hero.affixStacks['H08_A2']);
+      const canHitAir = cfg.canHitAir
+        || (hero.heroId === 'H07' && (!!hero.affixStacks['H07_SW'] || hero.evolved))
+        || (hero.heroId === 'H08' && !!hero.affixStacks['H08_A2']);
       const target = this.findNearestTarget(hero.x, hero.y, range, canHitAir);
       if (!target) continue;
 
-      const cd = cfg.attackInterval / spdMult;
+      const cd = cfg.attackInterval / Math.max(0.2, spdMult);
       hero.cooldown = cd;
       hero.maxCooldown = cd;
       hero.attackCount++;
       hero.attackAnimTimer = 0.32;
 
       const distBonus = cfg.dimDistance === 'melee'
-        ? (this.lordBonus.gemEffects.melee_dmg_pct || 0) / 100
+        ? st.get('meleeDmg', now)
         : cfg.dimDistance === 'ranged'
-          ? (this.lordBonus.gemEffects.ranged_dmg_pct || 0) / 100
+          ? st.get('rangedDmg', now)
+          : 0;
+      const elemBonus = cfg.dimElement === 'fire'
+        ? st.get('fireDmg', now)
+        : cfg.dimElement === 'poison'
+          ? st.get('poisonDmg', now)
           : 0;
 
+      // 门前位（gate）：对路径最后 30% 敌人额外 +15% 伤害（§3.1）
+      const targetDepth = target.pathTotalLen > 0 ? target.pathTraveled / target.pathTotalLen : 0;
+      const gateTailBonus = hero.slotType === 'gate' && targetDepth >= GATE_END_PATH_RATIO ? GATE_END_DMG_BONUS : 0;
+      const isEliteTarget = target.config.roleType === 'elite';
+      const eliteBonus = isEliteTarget ? st.get('dmgVsElite', now) : 0;
+      const evoBossBonus = hero.heroId === 'H02' && hero.evolved && (isEliteTarget || target.config.isBoss) ? 0.40 : 0;
+
       const baseAtkParams: AttackCalcParams = {
-        baseAtk: this.lordBonus.baseAtk,
+        baseAtk: st.get('atk', now),
         skillMultiplier: cfg.baseMultiplier,
-        outLevelBonus: outBonus,
-        globalDmgPct: gemHeroBonus + setBonus + talHeroBonus + hero.killBonusPct + 0.18 * cmdMultiLv + 0.10 * gemMulti + 0.15 * cmdFireLv,
-        elementDmgPct: cfg.dimElement === 'fire' ? gemFireBonus : 0,
+        outLevelBonus: 0, // 已通过 meta:hero_lv 注入 StatBlock.atk
+        globalDmgPct: hero.killBonusPct + 0.18 * cmdMultiLv + 0.10 * gemMulti + 0.15 * cmdFireLv + gateTailBonus + eliteBonus + evoBossBonus,
+        elementDmgPct: elemBonus,
         distanceDmgPct: distBonus,
-        bossDmgPct: gemBossBonus,
+        bossDmgPct: st.get('dmgVsBoss', now),
         armorPenetration: 0.15 * cmdPierceLv + 0.08 * gemPierce,
-        critRate: this.lordBonus.critRate + 0.10 * cmdCritLv + weapon.critRate + (tal?.critRatePct || 0) / 100,
-        critDmgBonus: this.lordBonus.globalCritDmgBonus + 0.25 * cmdCritLv + (tal?.critDmgPct || 0) / 100,
+        critRate: st.get('crit', now) + 0.10 * cmdCritLv,
+        critDmgBonus: st.get('critDmg', now) + 0.25 * cmdCritLv,
         dimDistance: cfg.dimDistance,
         dimElement: cfg.dimElement,
         canHitAir,
@@ -970,9 +1019,10 @@ export class BattleWorld {
     if (id === 'H01') {
       const ang = Math.atan2(target.y - hero.y, target.x - hero.x);
       const len = range * (af['H01_A3'] ? 1.2 : 1.0);
-      const maxPierce = 3 + 3 * (af['H01_A1'] || 0);
+      const isEvo = hero.evolved || !!af['H01_SW'];
+      const maxPierce = isEvo ? 999 : 3 + 3 * (af['H01_A1'] || 0);
       atk.skillMultiplier *= 1 + 0.25 * (af['H01_A3'] || 0);
-      const isSw = af['H01_SW'] && hero.attackCount % 3 === 0;
+      const isSw = isEvo && hero.attackCount % 3 === 0;
       if (isSw) atk.critRate += 0.25;
 
       const rays = isSw ? [-0.28, 0, 0.28] : [0];
@@ -986,7 +1036,8 @@ export class BattleWorld {
         for (const m of this.monsters) {
           if (m.dead || m.config.space === 'air') continue;
           if (distPointToSegment(m.x, m.y, hero.x, hero.y, ex, ey) <= m.config.radius + 22) {
-            this.applyHit(id, m, atk);
+            const pierceMult = isEvo ? 1 + hits * 0.1 : 1;
+            this.applyHit(id, m, pierceMult > 1 ? { ...atk, skillMultiplier: atk.skillMultiplier * pierceMult } : atk);
             if (af['H01_A4']) {
               m.shredPhysical = Math.max(m.shredPhysical, 0.2);
               m.shredPhysicalTimer = 3.0;
@@ -1024,6 +1075,14 @@ export class BattleWorld {
       const r = range * (1 + 0.25 * (af['H03_A2'] || 0));
       atk.globalDmgPct += 0.3 * (af['H03_A2'] || 0);
       const isRoar = af['H03_A1'] && hero.attackCount % 3 === 0;
+      const isEvoRoar = (hero.evolved || !!af['H03_SW']) && hero.roarCooldown <= 0;
+      if (isEvoRoar) {
+        hero.roarCooldown = 20;
+        for (const m of this.monsters) {
+          if (!m.dead && !m.isTargetDummy && !m.config.isBoss) m.stunTimer = Math.max(m.stunTimer, 0.8);
+        }
+        this.vfxEvents.push({ type: 'wind_push', x: hero.x, y: hero.y, radius: 380, color: '#FF3D00', duration: 0.35 });
+      }
       this.vfxEvents.push({ type: 'slash_arc', x: hero.x, y: hero.y, tx: target.x, ty: target.y, radius: r, color: isRoar ? '#FF3D00' : '#FF7043', duration: 0.25 });
       for (const m of this.monsters) {
         if (m.dead || m.config.space === 'air') continue;
@@ -1118,12 +1177,20 @@ export class BattleWorld {
         const ex = hero.x + Math.cos(ang) * len;
         const ey = hero.y + Math.sin(ang) * len;
         this.vfxEvents.push({ type: 'blade_wave', x: hero.x, y: hero.y, tx: ex, ty: ey, color: '#66BB6A', duration: 0.28 });
+        let evoKilled = false;
         for (const m of this.monsters) {
-          if (m.dead || (m.config.space === 'air' && !af['H07_SW'])) continue;
+          if (m.dead || (m.config.space === 'air' && !(af['H07_SW'] || hero.evolved))) continue;
           if (distPointToSegment(m.x, m.y, hero.x, hero.y, ex, ey) <= m.config.radius + 28) {
             this.applyHit(id, m, atk);
-            if (m.hp <= 0 && af['H07_A1']) hero.killBonusPct = Math.min(0.4, hero.killBonusPct + 0.02);
+            if (m.hp <= 0) {
+              if (af['H07_A1']) hero.killBonusPct = Math.min(0.4, hero.killBonusPct + 0.02);
+              evoKilled = true;
+            }
           }
+        }
+        // 关羽进化「单骑千里」：击杀后 0.5s 内再次出刀
+        if (evoKilled && (hero.evolved || af['H07_SW'])) {
+          hero.cooldown = Math.min(hero.cooldown, 0.45);
         }
       }
     } else if (id === 'H08') {
@@ -1460,12 +1527,13 @@ export class BattleWorld {
         : m.config.speed;
       const bossPhaseSpd = m.config.isBoss && m.bossPhase === 3 ? RUN_CONFIG.boss.phase3SpeedMult : 1.0;
       const enragedSpd = m.enraged && !m.config.isBoss ? 1.45 : 1.0;
+      const drumSlow = this.drumSlowTimer > 0 ? 0.40 : 0;
       const speedMult = m.speedMult
         * bossPhaseSpd
         * enragedSpd
         * overtimeMult
         * (m.elite === 'swift' ? 1.3 : 1.0)
-        * (1 - Math.min(0.65, m.slowRatio + barricadeSlow));
+        * (1 - Math.min(0.75, Math.max(m.slowRatio, drumSlow) + barricadeSlow));
       const moveDist = baseSpeed * speedMult * dt;
 
       if (dist <= moveDist) {
@@ -1563,6 +1631,13 @@ export class BattleWorld {
     const dmg = Math.max(1, Math.round(raw * (1 - this.wallDamageReduce)));
     this.wallHp = Math.max(0, this.wallHp - dmg);
     this.shakeRequest = Math.max(this.shakeRequest, dmg >= 150 ? 7 : 5);
+
+    // 漏怪受击怒气充能（§5.1：+2/次，每秒上限 +6）
+    if (this.wallRageThisSec < MUSOU_CONFIG.rageWallHitMaxPerSec) {
+      const add = Math.min(MUSOU_CONFIG.rageWallHit, MUSOU_CONFIG.rageWallHitMaxPerSec - this.wallRageThisSec);
+      this.wallRageThisSec += add;
+      this.addRage(add);
+    }
 
     // 血量首次跌破 30% 时触发「绝境三选一」（每局一次）
     if (!this.crisisTriggered && this.wallHp > 0 && this.wallHp / this.maxWallHp < RUN_CONFIG.crisisThreshold) {
@@ -1773,6 +1848,15 @@ export class BattleWorld {
           this.events.emit('elite_chest_dropped', { x: m.x, y: m.y });
         }
 
+        // 击杀怒气充能（§5.1 & 平衡文档 §5.2）
+        let rageGain = 0;
+        if (isBoss) rageGain = MUSOU_CONFIG.rageBossKill;
+        else if (isElite) {
+          rageGain = MUSOU_CONFIG.rageEliteKill + (m.waveId >= 16 && m.waveId <= 18 ? MUSOU_CONFIG.rageLateEliteBonus : 0);
+        } else if (roleType === 'rabble') rageGain = MUSOU_CONFIG.rageRabbleKill;
+        else rageGain = MUSOU_CONFIG.rageNormalKill;
+        if (rageGain > 0) this.addRage(rageGain);
+
         this.gainBattleExp(expGain, true);
         this.monsters.splice(i, 1);
         if (m.elite === 'split') {
@@ -1835,8 +1919,61 @@ export class BattleWorld {
     }
   }
 
+  private buildRogueDrawCtx(excludeCardUids?: string[]) {
+    const deployedIds = Array.from(this.deployedHeroes.keys());
+    const affixStacks: Record<string, Record<string, number>> = {};
+    for (const h of this.deployedHeroes.values()) {
+      affixStacks[h.heroId] = h.affixStacks;
+    }
+    const ownedCommands: Record<string, number> = {};
+    for (const s of this.lordCommands) ownedCommands[s.cmdId] = s.level;
+
+    return {
+      battleLevel: this.battleLevel,
+      maxSlots: this.maxHeroes,
+      deployedHeroIds: deployedIds,
+      heroAffixStacks: affixStacks,
+      lordSkillLevels: this.lordSkillLevels,
+      heroSaves: this.heroSaves,
+      wallHpRatio: this.wallHp / this.maxWallHp,
+      isChest: this.currentChoiceIsChest,
+      isOpeningCommand: this.currentChoiceIsOpeningCommand,
+      ownedCommands,
+      maxCommandSlots: MAX_LORD_CMD_SLOTS,
+      evolvedHeroIds: Array.from(this.evolvedHeroes),
+      noHeroChoicesStreak: this.noHeroChoicesStreak,
+      activeBonds: this.activeBonds,
+      excludeCardUids,
+      rng: this.rng,
+    };
+  }
+
+  public triggerOpeningCommandChoice(): void {
+    this.openingCommandPending = false;
+    this.currentChoiceIsOpeningCommand = true;
+    this.currentChoiceIsOpening = true;
+    this.currentChoiceIsChest = false;
+
+    const cards = drawThreeRogueCards(this.buildRogueDrawCtx());
+    if (cards.length === 0) {
+      this.currentChoiceIsOpeningCommand = false;
+      this.phase = 'PLAYING';
+      this.timeScale = this.userSpeed;
+      return;
+    }
+    this.pendingRogueCards = cards;
+    this.lastRogueCardUids = cards.map((c) => c.uid);
+    this.phase = 'ROGUE_CHOICE';
+    this.timeScale = 0;
+
+    if (this.autoMode) {
+      this.internal(() => this.selectRogueCard(0));
+    }
+  }
+
   public triggerNextRogueChoice(): void {
     if (this.pendingLevelUps <= 0 && this.pendingChestChoices <= 0) return;
+    this.currentChoiceIsOpeningCommand = false;
     if (this.pendingLevelUps > 0) {
       this.pendingLevelUps--;
       this.currentChoiceIsChest = false;
@@ -1847,28 +1984,18 @@ export class BattleWorld {
       this.currentChoiceIsChest = true;
       this.currentChoiceIsOpening = false;
     }
-    const deployedIds = Array.from(this.deployedHeroes.keys());
-    const affixStacks: Record<string, Record<string, number>> = {};
-    for (const h of this.deployedHeroes.values()) {
-      affixStacks[h.heroId] = h.affixStacks;
-    }
 
-    const cards = drawThreeRogueCards({
-      battleLevel: this.battleLevel,
-      maxSlots: this.maxHeroes,
-      deployedHeroIds: deployedIds,
-      heroAffixStacks: affixStacks,
-      lordSkillLevels: this.lordSkillLevels,
-      heroSaves: this.heroSaves,
-      wallHpRatio: this.wallHp / this.maxWallHp,
-      isChest: this.currentChoiceIsChest,
-      rng: this.rng,
-    });
+    const cards = drawThreeRogueCards(this.buildRogueDrawCtx());
 
     if (cards.length === 0) {
       this.phase = 'PLAYING';
       this.timeScale = this.userSpeed;
       return;
+    }
+
+    if (!this.currentChoiceIsOpening) {
+      if (cards.some((c) => c.type === 'NEW_HERO')) this.noHeroChoicesStreak = 0;
+      else this.noHeroChoicesStreak++;
     }
 
     this.pendingRogueCards = cards;
@@ -1888,22 +2015,7 @@ export class BattleWorld {
   private doRefreshRogueCards(): boolean {
     if (this.phase !== 'ROGUE_CHOICE' || this.adRefreshLeft <= 0) return false;
     this.adRefreshLeft--;
-    const deployedIds = Array.from(this.deployedHeroes.keys());
-    const affixStacks: Record<string, Record<string, number>> = {};
-    for (const h of this.deployedHeroes.values()) affixStacks[h.heroId] = h.affixStacks;
-
-    this.pendingRogueCards = drawThreeRogueCards({
-      battleLevel: this.battleLevel,
-      maxSlots: this.maxHeroes,
-      deployedHeroIds: deployedIds,
-      heroAffixStacks: affixStacks,
-      lordSkillLevels: this.lordSkillLevels,
-      heroSaves: this.heroSaves,
-      wallHpRatio: this.wallHp / this.maxWallHp,
-      isChest: this.currentChoiceIsChest,
-      excludeCardUids: this.lastRogueCardUids,
-      rng: this.rng,
-    });
+    this.pendingRogueCards = drawThreeRogueCards(this.buildRogueDrawCtx(this.lastRogueCardUids));
     this.lastRogueCardUids = this.pendingRogueCards.map((c) => c.uid);
     return true;
   }
@@ -1971,6 +2083,21 @@ export class BattleWorld {
         this.wallHp = Math.min(this.maxWallHp, this.wallHp + Math.round(this.maxWallHp * 0.2));
         this.wallDamageReduce = Math.min(0.4, this.wallDamageReduce + 0.1);
       }
+    } else if (card.type === 'LORD_CMD' && card.cmdId) {
+      this.grantOrUpgradeCommand(card.cmdId);
+    } else if (card.type === 'HERO_EVO' && card.heroId) {
+      const h = this.deployedHeroes.get(card.heroId);
+      const evo = EVOLUTION_CONFIGS[card.heroId];
+      if (h && evo) {
+        this.evolvedHeroes.add(card.heroId);
+        h.evolved = true;
+        h.evoName = evo.evoName;
+        h.affixStacks[evo.legacySwAffixId] = 1;
+        this.vfxEvents.push({ type: 'hero_evolve', x: h.x, y: h.y, radius: 110, color: '#FFD54F', duration: 0.9 });
+        this.floatTexts.push({ x: h.x, y: h.y + 42, text: `进化·${evo.evoName}!`, color: '#FFD54F', scale: 1.45, kind: 'superCrit' });
+        this.events.emit('hero_evolved', { heroId: h.heroId, heroName: h.config.name, evoName: evo.evoName });
+        this.recomputeSlotsAndBonds();
+      }
     } else if (card.type === 'HERO_AFFIX' && card.heroId && card.affixId) {
       const h = this.deployedHeroes.get(card.heroId);
       if (h) {
@@ -1985,7 +2112,35 @@ export class BattleWorld {
     }
   }
 
-  // 在任意合法坐标放置待部署武将（若靠近空闲推荐黄金坑位则轻吸附）
+  private grantOrUpgradeCommand(cmdId: string): void {
+    const cfg = getLordCommandConfig(cmdId);
+    if (!cfg) return;
+    const existing = this.lordCommands.find((s) => s.cmdId === cmdId);
+    if (existing) {
+      existing.level = Math.min(cfg.maxLevel, existing.level + 1);
+      existing.maxCooldown = Math.max(8, cfg.baseCooldown - (existing.level - 1) * cfg.cooldownStep);
+      existing.cooldown = Math.min(existing.cooldown, existing.maxCooldown);
+      return;
+    }
+    const newSlot: LordCommandSlot = {
+      cmdId,
+      level: 1,
+      cooldown: 0,
+      maxCooldown: cfg.baseCooldown,
+    };
+    if (this.lordCommands.length < MAX_LORD_CMD_SLOTS) {
+      this.lordCommands.push(newSlot);
+    } else {
+      // 满槽时默认替换等级最低的槽位
+      let minIdx = 0;
+      for (let i = 1; i < this.lordCommands.length; i++) {
+        if (this.lordCommands[i].level < this.lordCommands[minIdx].level) minIdx = i;
+      }
+      this.lordCommands[minIdx] = newSlot;
+    }
+  }
+
+  // 在固定预设坑位硬吸附放置待部署武将
   public placePendingHeroAt(x: number, y: number): { ok: boolean; reason?: string; snappedSlotId?: number } {
     return this.asOp({ k: 'place', x: Math.round(x), y: Math.round(y) }, () => this.doPlacePendingHeroAt(Math.round(x), Math.round(y)));
   }
@@ -1995,46 +2150,46 @@ export class BattleWorld {
       return { ok: false, reason: '当前不在选位状态' };
     }
 
-    let finalX = Math.round(x);
-    let finalY = Math.round(y);
-    let snappedSlotId: number | undefined;
-
-    for (const s of this.suggestedSlots) {
-      if (Math.hypot(s.x - x, s.y - y) <= 64) {
-        const occupied = Array.from(this.deployedHeroes.values()).some((h) => Math.hypot(h.x - s.x, h.y - s.y) < 30);
-        if (!occupied) {
-          finalX = s.x;
-          finalY = s.y;
-          snappedSlotId = s.id;
-          break;
-        }
-      }
+    const check = this.isPositionValidForDeploy(x, y);
+    if (!check.valid || !check.slot) {
+      return { ok: false, reason: check.reason || '请放置到空闲阵位上' };
     }
 
-    const check = this.isPositionValidForDeploy(finalX, finalY);
-    if (!check.valid) {
-      return { ok: false, reason: check.reason };
-    }
-
+    const slot = check.slot;
     const cfg = this.pendingHeroToPlace;
-    this.deployedHeroes.set(cfg.id, {
+    const slotType: SlotType = slot.slotType || 'normal';
+    const hero: DeployedHero = {
       heroId: cfg.id,
       config: cfg,
-      slotId: snappedSlotId,
-      x: finalX,
-      y: finalY,
+      slotId: slot.id,
+      slotType,
+      stats: this.createHeroStatBlock(cfg),
+      x: slot.x,
+      y: slot.y,
       cooldown: 0.35,
       maxCooldown: cfg.attackInterval,
+      prepTimer: 0,
+      roarCooldown: 0,
       attackCount: 0,
       specialTimer: 0,
       attackAnimTimer: 0.32,
       affixStacks: {},
       killBonusPct: 0,
-    });
+      evolved: false,
+    };
+    this.deployedHeroes.set(cfg.id, hero);
     this.damageStats[cfg.id] = this.damageStats[cfg.id] || 0;
     this.pendingHeroToPlace = null;
+    this.recomputeSlotsAndBonds();
+
+    // 首发武将落位后，立即进入开局军令 3 选 1（§4.2）
+    if (this.openingCommandPending) {
+      this.triggerOpeningCommandChoice();
+      return { ok: true, snappedSlotId: slot.id };
+    }
+
     this.resumeOrNextChoice();
-    return { ok: true, snappedSlotId };
+    return { ok: true, snappedSlotId: slot.id };
   }
 
   public placePendingHero(slotId: number): boolean {
@@ -2051,33 +2206,40 @@ export class BattleWorld {
     if (this.phase !== 'DEPLOY_PICK' || !this.pendingHeroToPlace) return false;
     const cfg = this.pendingHeroToPlace;
     const emptySlots = this.suggestedSlots.filter(
-      (s) => !Array.from(this.deployedHeroes.values()).some((h) => Math.hypot(h.x - s.x, h.y - s.y) < 35)
+      (s) => !Array.from(this.deployedHeroes.values()).some((h) => h.slotId === s.id || Math.hypot(h.x - s.x, h.y - s.y) < 35)
     );
-    // 首发武将优先前置/中排接敌，避免远程首发站在后排干等 15 秒无法升 Lv.2
-    const preferTag: SlotPos['tag'] =
-      this.deployedHeroes.size === 0
-        ? (cfg.range <= 240 ? 'front' : 'mid')
-        : (cfg.range <= 220 ? 'front' : cfg.range >= 290 ? 'back' : 'mid');
-    const best = emptySlots.find((s) => s.tag === preferTag) || emptySlots[0];
-    if (best) {
-      return this.placePendingHeroAt(best.x, best.y).ok;
+    if (emptySlots.length === 0) {
+      this.pendingHeroToPlace = null;
+      this.resumeOrNextChoice();
+      return false;
     }
 
-    // 推荐位都被占用时，搜索全图任意合法空地
-    for (let y = 860; y >= 380; y -= 65) {
-      for (let x = 120; x <= 630; x += 65) {
-        if (this.isPositionValidForDeploy(x, y).valid) {
-          return this.placePendingHeroAt(x, y).ok;
-        }
+    const meta = HERO_PHASE2_META[cfg.id];
+    const track = this.pathTracks[0];
+    const isOpeningHero = this.deployedHeroes.size === 0;
+
+    // 按 §3.4 打分：覆盖路径长度 × 亲和系数 + 坑位加成价值（首发优先上/中段尽早接敌）
+    let bestSlot = emptySlots[0];
+    let bestScore = -Infinity;
+    for (const s of emptySlots) {
+      const stype: SlotType = s.slotType || 'normal';
+      const effRange = stype === 'highland' ? cfg.range * 1.25 : cfg.range;
+      const cov = track ? track.measureCoverage(s.x, s.y, effRange, 40) : 200;
+      const aff = meta?.preferredSlots[0] === stype ? 1.3 : meta?.preferredSlots.includes(stype) ? 1.15 : 1.0;
+      let slotBonus = stype === 'highland' ? 50 : stype === 'gate' ? 40 : stype === 'support' ? (meta?.archetype === 'support' ? 140 : 25) : 30;
+      if (isOpeningHero && s.tag === 'back') slotBonus -= 220;
+      if (isOpeningHero && s.tag === 'front') slotBonus += 120;
+      const score = cov * aff + slotBonus;
+      if (score > bestScore) {
+        bestScore = score;
+        bestSlot = s;
       }
     }
 
-    this.pendingHeroToPlace = null;
-    this.resumeOrNextChoice();
-    return false;
+    return this.placePendingHeroAt(bestSlot.x, bestSlot.y).ok;
   }
 
-  // 战斗中任意自由拖拽换位（支持移动到任意空地，或拖到另一名武将身上互换位置）
+  // 战斗中固定坑位拖拽换位（支持移动到空闲坑位或与另一名武将互换；换位后 0.8s 准备时间）
   public moveHeroTo(heroId: string, x: number, y: number): { ok: boolean; reason?: string; swapped?: boolean } {
     const rx = Math.round(x);
     const ry = Math.round(y);
@@ -2091,49 +2253,41 @@ export class BattleWorld {
     const hero = this.deployedHeroes.get(heroId);
     if (!hero) return { ok: false, reason: '武将未上阵' };
 
-    // 检查是否拖到另一名武将身上 -> 互换位置
+    // 检查是否拖到另一名武将身上 -> 互换坑位
     for (const other of this.deployedHeroes.values()) {
-      if (other.heroId !== heroId && Math.hypot(other.x - x, other.y - y) <= 46) {
+      if (other.heroId !== heroId && Math.hypot(other.x - x, other.y - y) <= 52) {
         const ox = other.x;
         const oy = other.y;
         const os = other.slotId;
+        const ot = other.slotType;
         other.x = hero.x;
         other.y = hero.y;
         other.slotId = hero.slotId;
+        other.slotType = hero.slotType;
+        other.prepTimer = SLOT_SWAP_PREP_SEC;
         hero.x = ox;
         hero.y = oy;
         hero.slotId = os;
+        hero.slotType = ot;
+        hero.prepTimer = SLOT_SWAP_PREP_SEC;
         this.lockedHeroes.delete(heroId);
         this.swapCooldown = 1.5;
+        this.recomputeSlotsAndBonds();
         return { ok: true, swapped: true };
       }
     }
 
-    let finalX = Math.round(x);
-    let finalY = Math.round(y);
-    let snappedSlotId: number | undefined;
-    for (const s of this.suggestedSlots) {
-      if (Math.hypot(s.x - x, s.y - y) <= 64) {
-        const occupied = Array.from(this.deployedHeroes.values()).some(
-          (h) => h.heroId !== heroId && Math.hypot(h.x - s.x, h.y - s.y) < 30
-        );
-        if (!occupied) {
-          finalX = s.x;
-          finalY = s.y;
-          snappedSlotId = s.id;
-          break;
-        }
-      }
-    }
+    const check = this.isPositionValidForDeploy(x, y, heroId);
+    if (!check.valid || !check.slot) return { ok: false, reason: check.reason || '请拖动至空闲阵位' };
 
-    const check = this.isPositionValidForDeploy(finalX, finalY, heroId);
-    if (!check.valid) return { ok: false, reason: check.reason };
-
-    hero.x = finalX;
-    hero.y = finalY;
-    hero.slotId = snappedSlotId;
+    hero.x = check.slot.x;
+    hero.y = check.slot.y;
+    hero.slotId = check.slot.id;
+    hero.slotType = check.slot.slotType || 'normal';
+    hero.prepTimer = SLOT_SWAP_PREP_SEC;
     this.lockedHeroes.delete(heroId); // 换位可挣脱司马懿禁锢
     this.swapCooldown = 1.5;
+    this.recomputeSlotsAndBonds();
     return { ok: true, swapped: false };
   }
 
@@ -2247,7 +2401,429 @@ export class BattleWorld {
     return out;
   }
 
+  // ===================== 第 2 阶段：StatBlock / 坑位光环 / 羁绊 / 军令 / 怒气无双 =====================
+
+  private createHeroStatBlock(cfg: HeroConfig): StatBlock {
+    const outLv = this.heroSaves[cfg.id]?.level || 1;
+    const weapon = getWeaponConfig(this.lordBonus.weaponId);
+    const tal = this.lordBonus.talismanEffects;
+    const st = new StatBlock({
+      atk: this.lordBonus.baseAtk,
+      atkSpeed: 1,
+      range: cfg.range,
+      crit: this.lordBonus.critRate,
+      critDmg: this.lordBonus.globalCritDmgBonus,
+      dmgVsElite: 0,
+      dmgVsBoss: 0,
+      fireDmg: 0,
+      poisonDmg: 0,
+      meleeDmg: 0,
+      rangedDmg: 0,
+      cdReduce: 0,
+      rageGain: 1,
+      skillRange: 1,
+    });
+
+    // 统一通过 meta: 前缀注入局外养成加成（§2.2）
+    if (outLv > 1) {
+      st.add({ stat: 'atk', kind: 'pct', value: 0.05 * (outLv - 1), source: 'meta:hero_lv' });
+    }
+    const setBonus = (this.lordBonus.setDamageBonusPct || 0) / 100;
+    if (setBonus > 0) st.add({ stat: 'atk', kind: 'pct', value: setBonus, source: 'meta:equip' });
+
+    const g = this.lordBonus.gemEffects;
+    if (g.hero_dmg_pct) st.add({ stat: 'atk', kind: 'pct', value: g.hero_dmg_pct / 100, source: 'meta:gem' });
+    if (g.hero_atk_speed) st.add({ stat: 'atkSpeed', kind: 'pct', value: g.hero_atk_speed / 100, source: 'meta:gem' });
+    if (g.boss_dmg_pct) st.add({ stat: 'dmgVsBoss', kind: 'pct', value: g.boss_dmg_pct / 100, source: 'meta:gem' });
+    if (g.fire_dmg_pct) st.add({ stat: 'fireDmg', kind: 'pct', value: g.fire_dmg_pct / 100, source: 'meta:gem' });
+    if (g.melee_dmg_pct) st.add({ stat: 'meleeDmg', kind: 'pct', value: g.melee_dmg_pct / 100, source: 'meta:gem' });
+    if (g.ranged_dmg_pct) st.add({ stat: 'rangedDmg', kind: 'pct', value: g.ranged_dmg_pct / 100, source: 'meta:gem' });
+
+    if (weapon.critRate > 0) st.add({ stat: 'crit', kind: 'flat', value: weapon.critRate, source: 'meta:weapon' });
+
+    if (tal) {
+      if (tal.heroDmgPct) st.add({ stat: 'atk', kind: 'pct', value: tal.heroDmgPct / 100, source: 'meta:talisman' });
+      if (tal.heroAtkSpeedPct) st.add({ stat: 'atkSpeed', kind: 'pct', value: tal.heroAtkSpeedPct / 100, source: 'meta:talisman' });
+      if (tal.bossDmgPct) st.add({ stat: 'dmgVsBoss', kind: 'pct', value: tal.bossDmgPct / 100, source: 'meta:talisman' });
+      if (tal.critRatePct) st.add({ stat: 'crit', kind: 'flat', value: tal.critRatePct / 100, source: 'meta:talisman' });
+      if (tal.critDmgPct) st.add({ stat: 'critDmg', kind: 'flat', value: tal.critDmgPct / 100, source: 'meta:talisman' });
+    }
+
+    return st;
+  }
+
+  public recomputeSlotsAndBonds(): void {
+    const heroes = Array.from(this.deployedHeroes.values());
+    // 1. 清空并重算坑位修饰器（slot: 前缀）
+    for (const h of heroes) {
+      h.stats.removeBySourcePrefix('slot:');
+      if (h.slotType === 'highland') {
+        h.stats.add({ stat: 'range', kind: 'pct', value: 0.25, source: 'slot:highland' });
+      } else if (h.slotType === 'gate') {
+        h.stats.add({ stat: 'atkSpeed', kind: 'pct', value: 0.20, source: 'slot:gate' });
+      }
+    }
+
+    // 辅助位光环：半径 260px 内其他武将取最大值（+12%，辅助定位站位提升至 +18%），不叠加
+    for (const h of heroes) {
+      let bestAura = 0;
+      for (const sup of heroes) {
+        if (sup.heroId === h.heroId || sup.slotType !== 'support') continue;
+        if (Math.hypot(sup.x - h.x, sup.y - h.y) <= SUPPORT_AURA_RADIUS) {
+          const isSupRole = HERO_PHASE2_META[sup.heroId]?.archetype === 'support';
+          const val = isSupRole ? 0.18 : 0.12;
+          if (val > bestAura) bestAura = val;
+        }
+      }
+      if (bestAura > 0) {
+        h.stats.add({ stat: 'atk', kind: 'pct', value: bestAura, source: 'slot:aura' });
+      }
+    }
+
+    // 2. 重算羁绊并与上次 diff（bond: 前缀）
+    const prevTiers = new Map<string, number>();
+    for (const b of this.activeBonds) {
+      prevTiers.set(b.bond.id, b.tier?.need ?? 0);
+    }
+
+    const deployedIds = heroes.map((h) => h.heroId);
+    const nextBonds = evalBonds(deployedIds);
+    this.activeBonds = nextBonds;
+
+    for (const h of heroes) {
+      h.stats.removeBySourcePrefix('bond:');
+    }
+
+    for (const st of nextBonds) {
+      if (!st.tier) continue;
+      const src = `bond:${st.bond.id}:${st.tier.need}`;
+      for (const h of heroes) {
+        if (st.bond.scope === 'all' || st.memberIds.includes(h.heroId)) {
+          for (const mod of st.tier.mods) {
+            h.stats.add({ ...mod, source: src });
+          }
+        }
+      }
+      const oldNeed = prevTiers.get(st.bond.id) ?? 0;
+      if (st.tier.need > oldNeed) {
+        this.events.emit('bond_changed', {
+          bondId: st.bond.id,
+          name: st.bond.name,
+          tierNeed: st.tier.need,
+          memberIds: st.memberIds,
+          upgraded: oldNeed > 0,
+        });
+      }
+    }
+  }
+
+  public addRage(amount: number): void {
+    if (amount <= 0) return;
+    const prev = this.rage;
+    this.rage = Math.min(this.maxRage, this.rage + amount);
+    if (Math.floor(this.rage) !== Math.floor(prev) || this.rage >= this.maxRage) {
+      this.events.emit('rage_changed', { rage: this.rage, maxRage: this.maxRage });
+    }
+  }
+
+  public getRefAtk(): number {
+    if (this.deployedHeroes.size === 0) return this.lordBonus.baseAtk;
+    let sum = 0;
+    for (const h of this.deployedHeroes.values()) {
+      sum += h.stats.get('atk', this.elapsed);
+    }
+    return Math.max(this.lordBonus.baseAtk, sum / this.deployedHeroes.size);
+  }
+
+  public getCommandCdReduce(): number {
+    let best = 0;
+    for (const h of this.deployedHeroes.values()) {
+      best = Math.max(best, h.stats.get('cdReduce', this.elapsed));
+    }
+    return Math.min(0.45, best);
+  }
+
+  public getDominantBondId(): string | null {
+    let bestId: string | null = null;
+    let bestNeed = 0;
+    for (const b of this.activeBonds) {
+      if (b.tier && b.tier.need >= bestNeed) {
+        bestNeed = b.tier.need;
+        bestId = b.bond.id;
+      }
+    }
+    return bestId;
+  }
+
+  /** 释放主公主动军令（manual=true 享受 +20% 效果，记入 opLog 支持回放） */
+  public castLordCommand(slotIndex: number, x = 375, y = 740, manual = true): { ok: boolean; reason?: string } {
+    return this.asOp({ k: 'cmd', slot: slotIndex, x: Math.round(x), y: Math.round(y), m: manual }, () =>
+      this.doCastLordCommand(slotIndex, Math.round(x), Math.round(y), manual)
+    );
+  }
+
+  private doCastLordCommand(slotIndex: number, x: number, y: number, manual: boolean): { ok: boolean; reason?: string } {
+    if (this.phase !== 'PLAYING') return { ok: false, reason: '非战斗进行状态' };
+    const slot = this.lordCommands[slotIndex];
+    if (!slot) return { ok: false, reason: '该军令槽为空' };
+    if (slot.cooldown > 0) return { ok: false, reason: '军令冷却中' };
+    const cfg = getLordCommandConfig(slot.cmdId);
+    if (!cfg) return { ok: false, reason: '未知军令' };
+
+    const cdReduce = this.getCommandCdReduce();
+    const baseCd = Math.max(8, cfg.baseCooldown - (slot.level - 1) * cfg.cooldownStep);
+    slot.maxCooldown = Math.max(6, Math.round(baseCd * (1 - cdReduce) * 10) / 10);
+    slot.cooldown = slot.maxCooldown;
+
+    const lvMult = 1 + 0.20 * (slot.level - 1);
+    const manualMult = manual ? MANUAL_CAST_BONUS : 1.0;
+    const totalMult = lvMult * manualMult;
+    const atkRef = this.getRefAtk();
+
+    this.cmdCastCount++;
+    if (manual) this.cmdManualCount++;
+
+    if (cfg.id === 'CMD_ARROW') {
+      this.activeCmdEffects.push({
+        kind: 'arrow',
+        x,
+        y,
+        radius: cfg.radius,
+        remain: 2.5,
+        tickTimer: 0.05,
+        dmgPerTick: atkRef * 0.5 * totalMult,
+      });
+      this.vfxEvents.push({ type: 'cmd_arrow', x, y, radius: cfg.radius, color: cfg.color, duration: 0.65 });
+      this.floatTexts.push({ x, y: y + 36, text: manual ? '万箭齐发!' : '自动·万箭', color: '#FFD54F', scale: 1.25 });
+    } else if (cfg.id === 'CMD_FIRE') {
+      const track = this.pathTracks[0];
+      const proj = track.project(x, y);
+      this.activeCmdEffects.push({
+        kind: 'fire_road',
+        pathIndex: 0,
+        sStart: Math.max(0, proj.s - 150),
+        sEnd: Math.min(track.totalLen, proj.s + 150),
+        remain: 4.0,
+        tickTimer: 0.05,
+        dmgPerTick: atkRef * 0.4 * totalMult,
+      });
+      this.vfxEvents.push({ type: 'cmd_fire', x: proj.x, y: proj.y, radius: 150, color: cfg.color, duration: 0.8 });
+      this.floatTexts.push({ x: proj.x, y: proj.y + 36, text: manual ? '火攻焚道!' : '自动·火攻', color: '#FF7043', scale: 1.25 });
+    } else if (cfg.id === 'CMD_DRUM') {
+      this.drumSlowTimer = Math.max(this.drumSlowTimer, 5.0 * lvMult * (manual ? 1.1 : 1.0));
+      this.vfxEvents.push({ type: 'cmd_drum', x: 375, y: 650, radius: 340, color: cfg.color, duration: 0.55 });
+      this.floatTexts.push({ x: 375, y: 660, text: '擂鼓震敌 · 全场减速!', color: '#4FC3F7', scale: 1.3 });
+    } else if (cfg.id === 'CMD_RALLY') {
+      const dur = 6.0;
+      const spdBonus = 0.50 * totalMult;
+      const expAt = this.elapsed + dur;
+      for (const h of this.deployedHeroes.values()) {
+        h.stats.removeBySource('skill:cmd_rally');
+        h.stats.add({ stat: 'atkSpeed', kind: 'pct', value: spdBonus, source: 'skill:cmd_rally', expireAt: expAt });
+      }
+      this.vfxEvents.push({ type: 'cmd_rally', x: 375, y: 650, radius: 340, color: cfg.color, duration: 0.55 });
+      this.floatTexts.push({ x: 375, y: 660, text: `号令三军 · 攻速+${Math.round(spdBonus * 100)}%!`, color: '#FFCA28', scale: 1.3 });
+    } else if (cfg.id === 'CMD_LOG') {
+      const track = this.pathTracks[0];
+      const proj = track.project(x, y);
+      this.activeCmdEffects.push({
+        kind: 'log',
+        pathIndex: 0,
+        sCur: proj.s,
+        sEnd: Math.max(0, proj.s - 300),
+        speed: 360,
+        dmg: atkRef * 1.5 * totalMult,
+        hitUids: new Set(),
+      });
+      this.vfxEvents.push({ type: 'cmd_log', x: proj.x, y: proj.y, radius: 95, color: cfg.color, duration: 0.7 });
+      this.floatTexts.push({ x: proj.x, y: proj.y + 36, text: '滚木礌石!', color: '#D7CCC8', scale: 1.25 });
+    }
+
+    this.events.emit('command_cast', { cmdId: cfg.id, name: cfg.name, manual, x, y });
+    return { ok: true };
+  }
+
+  /** 释放终极无双（满 100 怒气，manual=true 享受 +20% 伤害） */
+  public castMusou(manual = true): { ok: boolean; reason?: string } {
+    return this.asOp({ k: 'musou', m: manual }, () => this.doCastMusou(manual));
+  }
+
+  private doCastMusou(manual: boolean): { ok: boolean; reason?: string } {
+    if (this.phase !== 'PLAYING') return { ok: false, reason: '非战斗进行状态' };
+    if (this.rage < this.maxRage) return { ok: false, reason: `怒气不足 ${Math.floor(this.rage)}/${this.maxRage}` };
+
+    this.rage = 0;
+    this.events.emit('rage_changed', { rage: 0, maxRage: this.maxRage });
+    this.musouCastCount++;
+    if (manual) this.musouManualCount++;
+    this.musouActiveTimer = MUSOU_CONFIG.furyDuration;
+
+    const atkRef = this.getRefAtk();
+    const manualMult = manual ? MANUAL_CAST_BONUS : 1.0;
+    const rawSlashDmg = atkRef * MUSOU_CONFIG.slashAtkMult * manualMult;
+    let hitCount = 0;
+
+    for (const m of this.monsters) {
+      if (m.dead || m.isTargetDummy) continue;
+      const isHeavy = m.config.isBoss || m.config.roleType === 'elite';
+      const cappedDmg = isHeavy
+        ? Math.min(rawSlashDmg, m.maxHp * MUSOU_CONFIG.bossEliteMaxHpCap)
+        : rawSlashDmg;
+      this.applyHit('MUSOU', m, {
+        baseAtk: cappedDmg,
+        skillMultiplier: 1.0,
+        outLevelBonus: 0,
+        globalDmgPct: 0,
+        elementDmgPct: 0,
+        distanceDmgPct: 0,
+        bossDmgPct: 0,
+        armorPenetration: 0.35,
+        critRate: 0.25,
+        critDmgBonus: this.lordBonus.globalCritDmgBonus,
+        dimDistance: 'magic',
+        dimElement: 'physical',
+        canHitAir: true,
+        isAoeOrPierce: true,
+        rng: this.rng,
+      });
+      hitCount++;
+    }
+
+    // 狂暴阶段（2.6s）：全武将攻速 +100%（pct）、伤害 +30%（mul）
+    const expAt = this.elapsed + MUSOU_CONFIG.furyDuration;
+    for (const h of this.deployedHeroes.values()) {
+      h.stats.removeBySource('musou:fury');
+      h.stats.add({ stat: 'atkSpeed', kind: 'pct', value: MUSOU_CONFIG.furyAtkSpeedPct, source: 'musou:fury', expireAt: expAt });
+      h.stats.add({ stat: 'atk', kind: 'mul', value: MUSOU_CONFIG.furyAtkMul * (manual ? 1.15 : 1.0), source: 'musou:fury', expireAt: expAt });
+    }
+
+    const domBond = this.getDominantBondId();
+    this.shakeRequest = Math.max(this.shakeRequest, 9);
+    this.vfxEvents.push({ type: 'musou_slash', x: 375, y: 680, radius: 420, color: '#FFD54F', duration: 0.75 });
+    this.floatTexts.push({ x: 375, y: 720, text: manual ? '无双·乱舞!!' : '自动·无双乱舞!', color: '#FFD54F', scale: 1.55, kind: 'superCrit' });
+    this.events.emit('musou_cast', { manual, dominantBondId: domBond, hitCount });
+    return { ok: true };
+  }
+
+  private updateCommandEffects(dt: number): void {
+    for (let i = this.activeCmdEffects.length - 1; i >= 0; i--) {
+      const eff = this.activeCmdEffects[i];
+      if (eff.kind === 'arrow') {
+        eff.remain -= dt;
+        eff.tickTimer -= dt;
+        if (eff.tickTimer <= 0) {
+          eff.tickTimer = 0.25;
+          for (const m of this.monsters) {
+            if (m.dead || m.isTargetDummy) continue;
+            if (Math.hypot(m.x - eff.x, m.y - eff.y) <= eff.radius) {
+              this.applyHit('LORD_CMD', m, {
+                baseAtk: eff.dmgPerTick, skillMultiplier: 1.0, outLevelBonus: 0, globalDmgPct: 0,
+                elementDmgPct: 0, distanceDmgPct: 0, bossDmgPct: 0, armorPenetration: 0.15,
+                critRate: this.lordBonus.critRate, critDmgBonus: this.lordBonus.globalCritDmgBonus,
+                dimDistance: 'ranged', dimElement: 'physical', canHitAir: true, isAoeOrPierce: true, rng: this.rng,
+              });
+            }
+          }
+        }
+        if (eff.remain <= 0) this.activeCmdEffects.splice(i, 1);
+      } else if (eff.kind === 'fire_road') {
+        eff.remain -= dt;
+        eff.tickTimer -= dt;
+        if (eff.tickTimer <= 0) {
+          eff.tickTimer = 0.5;
+          for (const m of this.monsters) {
+            if (m.dead || m.isTargetDummy) continue;
+            if (m.pathTraveled >= eff.sStart && m.pathTraveled <= eff.sEnd) {
+              this.applyHit('LORD_CMD', m, {
+                baseAtk: eff.dmgPerTick, skillMultiplier: 1.0, outLevelBonus: 0, globalDmgPct: 0,
+                elementDmgPct: (this.lordBonus.gemEffects.fire_dmg_pct || 0) / 100, distanceDmgPct: 0, bossDmgPct: 0,
+                armorPenetration: 0, critRate: this.lordBonus.critRate, critDmgBonus: this.lordBonus.globalCritDmgBonus,
+                dimDistance: 'magic', dimElement: 'fire', canHitAir: true, isAoeOrPierce: true, rng: this.rng,
+              });
+            }
+          }
+        }
+        if (eff.remain <= 0) this.activeCmdEffects.splice(i, 1);
+      } else if (eff.kind === 'log') {
+        const nextS = Math.max(eff.sEnd, eff.sCur - eff.speed * dt);
+        const track = this.pathTracks[eff.pathIndex] || this.pathTracks[0];
+        const sample = track.sampleAt(nextS);
+        for (const m of this.monsters) {
+          if (m.dead || m.isTargetDummy || eff.hitUids.has(m.uid) || m.config.space === 'air') continue;
+          if (m.pathTraveled >= nextS - 28 && m.pathTraveled <= eff.sCur + 28) {
+            eff.hitUids.add(m.uid);
+            this.applyHit('LORD_CMD', m, {
+              baseAtk: eff.dmg, skillMultiplier: 1.0, outLevelBonus: 0, globalDmgPct: 0,
+              elementDmgPct: 0, distanceDmgPct: 0, bossDmgPct: 0, armorPenetration: 0.2,
+              critRate: this.lordBonus.critRate, critDmgBonus: this.lordBonus.globalCritDmgBonus,
+              dimDistance: 'melee', dimElement: 'physical', canHitAir: false, isAoeOrPierce: true, rng: this.rng,
+            }, sample.x, sample.y);
+            this.pushMonsterBackAlongPath(m, m.config.isBoss ? 40 : 80);
+          }
+        }
+        eff.sCur = nextS;
+        if (eff.sCur <= eff.sEnd + 1) this.activeCmdEffects.splice(i, 1);
+      }
+    }
+  }
+
+  private updateAutoCommandsAndMusou(dt: number): void {
+    if (!this.autoMode || this.phase !== 'PLAYING') return;
+    this.autoCmdCheckTimer -= dt;
+    if (this.autoCmdCheckTimer > 0) return;
+    this.autoCmdCheckTimer = 0.45;
+
+    const alive = this.monsters.filter((m) => !m.dead && !m.isTargetDummy);
+    if (alive.length === 0) return;
+
+    const hasPriorityThreat = alive.some((m) => m.config.isBoss || m.config.roleType === 'elite');
+    const wallRatio = this.wallHp / Math.max(1, this.maxWallHp);
+
+    // 1. 自动无双（§5.3：满怒气且 怪>=12 或 有精英/Boss 或 城墙<40%）
+    if (
+      this.rage >= this.maxRage
+      && (alive.length >= MUSOU_CONFIG.autoMinAliveMonsters || hasPriorityThreat || wallRatio < MUSOU_CONFIG.autoCrisisWallRatio)
+    ) {
+      this.internal(() => this.castMusou(false));
+      return;
+    }
+
+    // 2. 自动军令：优先找最密集目标点或最靠前威胁
+    for (let idx = 0; idx < this.lordCommands.length; idx++) {
+      const slot = this.lordCommands[idx];
+      if (slot.cooldown > 0) continue;
+      const cfg = getLordCommandConfig(slot.cmdId);
+      if (!cfg) continue;
+
+      if (cfg.targetMode === 'global') {
+        if (alive.length >= 6 || hasPriorityThreat) {
+          this.internal(() => this.castLordCommand(idx, 375, 680, false));
+          return;
+        }
+      } else {
+        // 寻找最靠前或最密集的怪点
+        let bestTarget = alive[0];
+        let bestScore = -1;
+        for (const m of alive) {
+          let near = 0;
+          for (const o of alive) {
+            if (Math.hypot(o.x - m.x, o.y - m.y) <= 140) near++;
+          }
+          const score = near + (m.config.isBoss ? 8 : m.config.roleType === 'elite' ? 4 : 0) + (m.pathTraveled / Math.max(1, m.pathTotalLen)) * 3;
+          if (score > bestScore) { bestScore = score; bestTarget = m; }
+        }
+        if (bestScore >= 4 || hasPriorityThreat) {
+          this.internal(() => this.castLordCommand(idx, bestTarget.x, bestTarget.y, false));
+          return;
+        }
+      }
+    }
+  }
+
   public getTelemetryReport() {
+    const activeBondSummary = this.activeBonds
+      .filter((b) => b.tier !== null)
+      .map((b) => `${b.bond.name}(${b.tier!.need})`);
     return {
       stageId: this.stage.stageId,
       elapsed: Math.round(this.elapsed * 10) / 10,
@@ -2264,6 +2840,12 @@ export class BattleWorld {
       bossKillDepth: Math.round(this.bossKillDepth * 1000) / 1000,
       downwardAssistTriggers: this.waveDirector.downwardAssistTriggers,
       catchupBoostCount: this.catchupBoostCount,
+      cmdCastCount: this.cmdCastCount,
+      cmdManualCount: this.cmdManualCount,
+      musouCastCount: this.musouCastCount,
+      musouManualCount: this.musouManualCount,
+      activeBonds: activeBondSummary,
+      evolvedCount: this.evolvedHeroes.size,
       waveRecords: this.waveDirector.waveRecords,
       levelUpTimes: this.levelUpTimes,
       wallHpSamples: this.wallHpSamples,

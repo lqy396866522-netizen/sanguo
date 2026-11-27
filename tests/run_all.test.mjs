@@ -98,8 +98,9 @@ test('2. 肉鸽唯一上阵、前3级保底与无双超武前置解锁测试', (
     lordSkillLevels: { LS_MULTI: 4, LS_PIERCE: 4, LS_SPEED: 4, LS_FIRE: 3, LS_THUNDER: 3, LS_CRIT: 3, LS_WALL: 3 },
     heroSaves: saves,
     wallHpRatio: 1,
+    rng: () => 0.99,
   });
-  assert.ok(cardsWithPre.some((c) => c.affixId === 'H02_SW'), '15级且前置满足后超武应正常入池');
+  assert.ok(cardsWithPre.some((c) => c.affixId === 'H02_SW'), '15级且前置满足后进化/超武应正常入池');
 });
 
 test('3. 局外装备无损继承、宝石5合1锁定保护、点将录全局暴伤与本地存档测试', () => {
@@ -154,7 +155,8 @@ test('4. 点将台自由选位、拖拽换位冷却与端到端战役战斗模�
   world.selectRogueCard(heroCardIdx);
   assert.equal(world.phase, 'DEPLOY_PICK');
   assert.equal(world.placePendingHero(1), true);
-  // 开局仅选择 1 名首发武将，放置后即刻开战
+  // 首发落位后选 1 个开局军令，选完即刻开战
+  if (world.phase === 'ROGUE_CHOICE') world.selectRogueCard(0);
   assert.equal(world.deployedHeroes.size, 1);
   assert.equal(world.phase, 'PLAYING');
 
@@ -274,7 +276,7 @@ test('7. 前50关专属曲折地图、随机坑位与任意空地自由放置/�
     assert.equal(world.isPositionValidForDeploy(s.x, s.y).valid, true, `推荐坑位(${s.x},${s.y})必须合法`);
   }
 
-  // 进入选位状态，测试压路拦截 vs 任意空地自由放置
+  // 进入选位状态，测试压路拦截 vs 固定阵位硬吸附
   const hIdx = world.pendingRogueCards.findIndex((c) => c.type === 'NEW_HERO');
   world.selectRogueCard(hIdx >= 0 ? hIdx : 0);
   if (world.phase === 'DEPLOY_PICK') {
@@ -282,9 +284,11 @@ test('7. 前50关专属曲折地图、随机坑位与任意空地自由放置/�
     const onRoad = world.placePendingHeroAt(150, 880);
     assert.equal(onRoad.ok, false, '压在行军道路上的坐标必须被拒绝');
 
-    // 任意道路外空地（例如 (360, 720) 位于U型弯道中央空地，非固定坑位）必须可随意放置
-    const freeRes = world.placePendingHeroAt(360, 720);
-    assert.equal(freeRes.ok, true, '道路外任意合法空地应允许随意放置');
+    // 固定预设阵位附近应自动硬吸附成功
+    const targetSlot = world.suggestedSlots[0];
+    const snapRes = world.placePendingHeroAt(targetSlot.x + 10, targetSlot.y - 10);
+    assert.equal(snapRes.ok, true, '固定预设阵位附近应硬吸附落位成功');
+    assert.equal(snapRes.snappedSlotId, targetSlot.id);
   }
 });
 

@@ -17,3 +17,8 @@ export { FxPool } from './FxPool';
 export { setSpriteAdditive } from './Blend';
 export type { FxDotOpts } from './FxPool';
 export { FxTag } from './FxTag';
+export { ConfettiLayer } from './ConfettiLayer';
+export { playBezierFly } from './BezierFlyFX';
+export type { BezierFlyOpts } from './BezierFlyFX';
+export { createHexBadge, playBadgeDrop } from './BadgeDropFX';
+export type { BadgeDropOpts } from './BadgeDropFX';

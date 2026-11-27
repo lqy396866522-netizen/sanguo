@@ -118,14 +118,15 @@ export class BattleDebugPanel {
     const pDepth = Math.round((depths.pressure || 0) * 100);
     const rDepth = Math.round((depths.release || 0) * 100);
     const catchup = w.getCurrentCatchupMult().toFixed(2);
+    const activeBondCnt = w.activeBonds.filter((b) => b.tier !== null).length;
 
     this.lblStats.string = [
       `时间: ${w.elapsed.toFixed(1)}s | 波次: ${wave}/20 (${w.waveDirector.currentWaveKind})`,
       `等级: Lv.${w.battleLevel} (${w.battleExp.toFixed(1)}/${w.expNeeded}) 追赶:x${catchup} 下行:${w.waveDirector.downwardAssistTriggers}`,
       `最近升级: ${lvDiffStr}`,
-      `击杀深度: 压力${pDepth}% / 释放${rDepth}% | 怪:${w.monsters.length} 将:${w.deployedHeroes.size}`,
-      `城墙: ${w.wallHp}/${w.maxWallHp} (${hpPct}%) | 绝境:${w.crisisTriggered ? '已触' : '未触'}`,
-      `连斩: x${w.combo.combo} (最高 x${w.combo.maxCombo}) | 击杀: ${w.kills}`,
+      `深度: 压${pDepth}%/释${rDepth}% | 怒气:${Math.floor(w.rage)} | 军令:${w.cmdCastCount} 无双:${w.musouCastCount}`,
+      `羁绊:${activeBondCnt} 进化:${w.evolvedHeroes.size} | 怪:${w.monsters.length} 将:${w.deployedHeroes.size}`,
+      `城墙: ${w.wallHp}/${w.maxWallHp} (${hpPct}%) | 连斩:x${w.combo.combo}(最高x${w.combo.maxCombo})`,
       `FPS: ${this.curFps} | 倍速: x${w.userSpeed}`,
     ].join('\n');
   }

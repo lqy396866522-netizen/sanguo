@@ -11,8 +11,10 @@ import {
   attachGlowPulse,
   attachIdleBreath,
   attachNumberRoll,
+  attachSpinLoop,
   bindModalBackdropClose,
   createButton,
+  createHexBadge,
   createLabel,
   createModalOverlay,
   createUINode,
@@ -20,9 +22,13 @@ import {
   drawLeftAlignedBar,
   drawRoundedBox,
   getScreenLayout,
+  playBadgeDrop,
   playBattleTransition,
   playChestOpen,
+  playConfettiBurst,
+  playConsumeFly,
   playFlyIcons,
+  playGlowRing,
   playShakeDeny,
   playTickPop,
   popInModal,
@@ -42,6 +48,7 @@ export interface HallCallbacks {
 
 export class HallView {
   private static lastRes = { diamond: -1, gold: -1, stamina: -1 };
+  private static lastLordLevel = -1;
   private root: Node;
   private dataMgr: PlayerDataManager;
   private adService: IAdService;
@@ -121,6 +128,10 @@ export class HallView {
 
     createLabel(topBar, `${p.nickname} Lv.${p.level}`, 24, '#FFE082', -162, 22, 200, 32, true);
     createLabel(topBar, `战力 ${this.dataMgr.getCombatPower()}`, 22, '#69F0AE', -162, -20, 190, 28, true);
+
+    const diaPos = new Vec3(8, topBarY + 22, 0);
+    const goldPos = new Vec3(140, topBarY + 22, 0);
+    const stamPos = new Vec3(260, topBarY + 22, 0);
 
     ArtAssetManager.createSpriteNode(topBar, 'icon_diamond', 28, 28, -46, 22);
     const lblDia = createLabel(topBar, `${p.diamond}`, 22, '#80D8FF', 8, 22, 84, 28, true);
@@ -292,16 +303,52 @@ export class HallView {
             showToast(this.root, claimed ? '该宝箱已领取' : `本关达成 ${i} 星后可领取`);
             return;
           }
+          const oldGold = p.gold;
+          const oldDia = p.diamond;
           const r = this.dataMgr.claimStageBox(stage.stageId, i as 1 | 2 | 3);
           if (!r.ok) return showToast(this.root, r.msg);
+          const gainGold = p.gold - oldGold;
+          const gainDia = p.diamond - oldDia;
+          HallView.lastRes.gold = p.gold;
+          HallView.lastRes.diamond = p.diamond;
+          AudioManager.playSfx('sfx_coin');
           const chestPos = new Vec3(x, boxPanelY, 0);
           const onOpen = () => {
-            playFlyIcons(this.root, chestPos, new Vec3(130, topBarY, 0), 5, 'icon_gold', '#FFD54F');
-            FloatText.show(this.root, chestBtn.node.worldPosition, '宝箱开启!', FloatStyle.gold);
+            playConfettiBurst(this.root, chestPos, 32);
+            const popTxt = gainDia > 0 ? `+${gainGold}铜钱 +${gainDia}元宝` : `+${gainGold}铜钱`;
+            FloatText.show(this.root, chestBtn.node.worldPosition, popTxt, FloatStyle.gold);
             showToast(this.root, r.msg);
-            tween(this.root).delay(0.9).call(() => {
-              if (this.root.getChildByName('HallBg')) this.render();
-            }).start();
+            const finishRefresh = () => {
+              if (this.root.isValid && this.root.getChildByName('HallBg')) this.render();
+            };
+            playFlyIcons(
+              this.root,
+              chestPos,
+              goldPos,
+              10,
+              'icon_gold',
+              '#FFD54F',
+              gainDia > 0 ? undefined : finishRefresh,
+              (idx, total) => {
+                if (gainGold > 0) nrGold.rollTo(oldGold + Math.round((gainGold * (idx + 1)) / total));
+              },
+              lblGold.node
+            );
+            if (gainDia > 0) {
+              playFlyIcons(
+                this.root,
+                chestPos,
+                diaPos,
+                8,
+                'icon_diamond',
+                '#80D8FF',
+                finishRefresh,
+                (idx, total) => {
+                  nrDia.rollTo(oldDia + Math.round((gainDia * (idx + 1)) / total));
+                },
+                lblDia.node
+              );
+            }
           };
           if (chestSp) playChestOpen(chestSp, this.root, chestPos, onOpen);
           else onOpen();
@@ -359,10 +406,29 @@ export class HallView {
           return showToast(this.root, '粮草不足!');
         }
         this.transitioning = true;
-        playBattleTransition(this.root, () => {
-          this.transitioning = false;
-          this.callbacks.onStartBattle(stage.stageId, this.challengeMode);
-        });
+        HallView.lastRes.stamina = p.stamina;
+        nrStam.rollTo(p.stamina);
+        playTickPop(lblStam.node, 1.12);
+        FloatText.show(this.root, lblStam.node.worldPosition, `-${stage.costStamina}粮草`, FloatStyle.warn);
+        playConsumeFly(
+          this.root,
+          stamPos,
+          new Vec3(94, actionY, 0),
+          5,
+          'icon_stamina',
+          '#AED581',
+          () => {
+            if (!this.root.isValid) {
+              this.transitioning = false;
+              return;
+            }
+            playBattleTransition(this.root, () => {
+              this.transitioning = false;
+              this.callbacks.onStartBattle(stage.stageId, this.challengeMode);
+            });
+          },
+          startBtn.node
+        );
       },
       94, actionY, 30, '#FFF8E1', canStart && !this.challengeMode ? '#1A1426' : '#FFFFFF'
     );
@@ -373,6 +439,60 @@ export class HallView {
 
     // 8. 统一底部导航栏
     renderBottomNavBar(this.root, 'hall', (tab) => this.callbacks.onSwitchTab(tab), this.callbacks.getBadges?.());
+
+    // 9. 主公升级检测：战后/挂机返回等级提升时弹出徽章掉落 + 交互彩纸庆祝弹窗
+    if (HallView.lastLordLevel > 0 && p.level > HallView.lastLordLevel) {
+      const fromLv = HallView.lastLordLevel;
+      HallView.lastLordLevel = p.level;
+      this.showLordLevelUpModal(fromLv, p.level);
+    } else {
+      HallView.lastLordLevel = p.level;
+    }
+  }
+
+  private showLordLevelUpModal(oldLevel: number, newLevel: number): void {
+    const mask = createModalOverlay(this.root);
+    const box = createUINode('LordLevelUpBox', 580, 560, mask, 0, 0);
+    drawCardPanel(box, 580, 560, '#1C142B', '#FFD54F', 20, 3);
+    ArtAssetManager.skinPanel(box, 580, 560);
+    popInModal(box, mask);
+
+    attachSpinLoop(box, 300, 20, '#FFD54F', 0, 140, true);
+    attachGlowPulse(box, 200, '#FFE082', 0, 140, true, { minOpacity: 85, maxOpacity: 220, scaleAmp: 0.14 });
+
+    const badge = createHexBadge(box, 146, '#283593', '#FFD54F', '主公晋升', `Lv.${newLevel}`, '点击撒花', 0, 140);
+
+    const tray = createUINode('LevelUpTray', 500, 176, box, 0, -68);
+    const trayOp = tray.addComponent(UIOpacity);
+    trayOp.opacity = 0;
+    createLabel(tray, '恭喜主公威望精进！', 28, '#FFE082', 0, 58, 460, 36, true);
+    const lvLbl = createLabel(tray, `主公等级  Lv.${oldLevel}`, 24, '#69F0AE', 0, 14, 440, 32, true);
+    const nrLv = attachNumberRoll(lvLbl.node, oldLevel, { prefix: '主公等级  Lv.', duration: 0.65, tintOnIncrease: true });
+
+    const perkBox = createUINode('PerkBox', 460, 62, tray, 0, -44);
+    drawRoundedBox(perkBox, 460, 62, '#130E20', 225, 14, '#C89B42', 1.5);
+    const talTotal = this.dataMgr.talentPointsTotal() - this.dataMgr.talentPointsUsed();
+    createLabel(perkBox, `获得新天赋点 · 当前可用天赋点 ${talTotal}`, 21, '#80D8FF', 0, 0, 430, 30, true);
+
+    playBadgeDrop(badge, mask, {
+      initialConfetti: 65,
+      tapConfetti: 36,
+      confettiPos: new Vec3(0, 140, 0),
+      onReveal: () => {
+        AudioManager.playSfx('sfx_levelup');
+        playGlowRing(box, new Vec3(0, 140, 0), 160, '#FFD54F', true);
+        if (!tray.isValid) return;
+        tween(tray).to(0.32, { position: new Vec3(0, -52, 0) }, { easing: 'backOut' }).start();
+        tween(trayOp).to(0.28, { opacity: 255 }).start();
+        nrLv.rollTo(newLevel);
+      },
+      onTap: () => {
+        AudioManager.playSfx('sfx_coin', 0.65, 1.15);
+        playGlowRing(box, new Vec3(0, 140, 0), 120, '#FFE082');
+      },
+    });
+
+    createButton(box, '威武！', 280, 62, '#2E7D32', () => mask.destroy(), 0, -214, 24, '#FFF8E1');
   }
 
   private showPatrolModal(): void {

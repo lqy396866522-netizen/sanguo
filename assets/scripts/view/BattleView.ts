@@ -24,6 +24,11 @@ import {
 } from '../core/BattleWorld.ts';
 import { ELITE_AFFIXES } from '../core/phase2Configs.ts';
 import { getHeroConfig, MONSTER_CONFIGS } from '../core/configs.ts';
+import {
+  getLordCommandConfig,
+  SLOT_TYPE_META,
+  SUPPORT_AURA_RADIUS,
+} from '../core/Phase2BattleConfigs.ts';
 import type { BattleReport, BattleVfxEvent } from '../core/types.ts';
 import type { PlayerDataManager } from '../data/PlayerDataManager.ts';
 import type { IAdService } from '../sdk/MockServices.ts';
@@ -31,8 +36,10 @@ import {
   attachGlowPulse,
   attachHitFlash,
   attachIdleBreath,
+  attachNumberRoll,
   attachSpinLoop,
   createButton,
+  createHexBadge,
   createLabel,
   createModalOverlay,
   createUINode,
@@ -40,8 +47,12 @@ import {
   drawLeftAlignedBar,
   drawRoundedBox,
   hexToColor,
+  playBadgeDrop,
   playBurstParticles,
+  playConfettiBurst,
+  playFlyIcons,
   playGlowRing,
+  playTickPop,
   popInModal,
   showToast,
   translateDistance,
@@ -181,6 +192,16 @@ export class BattleView {
   private reviveModal: Node | null = null;
   private settleModal: Node | null = null;
   private peekingField = false;
+
+  // 第 2 阶段 HUD：双军令槽、无双大圆按钮、羁绊图标栏与瞄准状态
+  private cmdBtnNodes: Node[] = [];
+  private cmdBtnLabels: Label[] = [];
+  private musouBtnNode!: Node;
+  private lblMusou!: Label;
+  private bondBarNode!: Node;
+  private lastBondSig = '';
+  private aimingCmdSlot = -1;
+  private aimPos: { x: number; y: number } | null = null;
 
   // 自由选位与自由拖拽状态
   private previewPos: { x: number; y: number } | null = null;
@@ -363,6 +384,25 @@ export class BattleView {
 
     ev.on('combo_milestone', (e) => {
       this.showComboMilestone(e.combo, e.title, e.tier);
+    });
+
+    ev.on('bond_changed', (e) => {
+      AudioManager.playSfx('sfx_levelup', 0.75);
+      this.showPhase2Banner(`${e.upgraded ? '羁绊升档' : '羁绊激活'} · ${e.name} (${e.tierNeed}人)`, '#FFD54F', '#1B2E1E', '#69F0AE');
+      this.refreshBondBar();
+    });
+
+    ev.on('hero_evolved', (e) => {
+      AudioManager.playSfx('sfx_levelup', 0.95);
+      TimeScaleManager.request('evolve', 0.25, 0.55);
+      ScreenShake.play(6, 0.22);
+      this.showPhase2Banner(`武将进化 · ${e.heroName} → ${e.evoName}!`, '#FFE57F', '#3A1D08', '#FFD54F');
+    });
+
+    ev.on('musou_cast', () => {
+      AudioManager.playSfx('sfx_crit', 1.0);
+      TimeScaleManager.request('musou', 0.2, 0.45);
+      ScreenShake.play(9, 0.35);
     });
   }
 
@@ -595,6 +635,32 @@ export class BattleView {
     }, 306, autoY, 22);
     this.lblAuto = autoBtn.label;
 
+    // 第 2 阶段底部左侧：2 枚主公主动军令按钮（支持点击即放 + 目标型按住拖拽瞄准释放）
+    const cmdStartX = -302;
+    const cmdYs = [autoY + 78, autoY - 8];
+    this.cmdBtnNodes = [];
+    this.cmdBtnLabels = [];
+    for (let slotIdx = 0; slotIdx < 2; slotIdx++) {
+      const btnNode = createUINode(`CmdSlot_${slotIdx}`, 102, 74, hud, cmdStartX, cmdYs[slotIdx]);
+      drawRoundedBox(btnNode, 102, 74, '#241B36', 235, 14, '#7E57C2', 2);
+      const lbl = createLabel(btnNode, `军令${slotIdx + 1}\n待解锁`, 18, '#B0BEC5', 0, 0, 96, 62, true);
+      this.cmdBtnNodes.push(btnNode);
+      this.cmdBtnLabels.push(lbl);
+      this.bindCommandButtonTouch(btnNode, slotIdx);
+    }
+
+    // 第 2 阶段底部右侧：无双大圆按钮（置于自动按钮左侧，带实时怒气进度）
+    this.musouBtnNode = createUINode('MusouBtn', 106, 106, hud, 192, autoY + 4);
+    drawRoundedBox(this.musouBtnNode, 106, 106, '#2A1812', 240, 53, '#78909C', 3);
+    this.lblMusou = createLabel(this.musouBtnNode, '无双\n0%', 22, '#CFD8DC', 0, 0, 96, 66, true);
+    this.musouBtnNode.on(Node.EventType.TOUCH_END, () => {
+      const res = this.world.castMusou(true);
+      if (!res.ok && res.reason) showToast(this.root, res.reason);
+    });
+
+    // 第 2 阶段已激活羁绊胶囊栏（置于波次进度条正下方左侧空白区）
+    this.bondBarNode = createUINode('BondBar', 540, 34, hud, -40, topY - 118);
+
     const hpBg = createUINode('HpBg', 664, 38, hud, 0, this.hpBarY);
     drawRoundedBox(hpBg, 664, 38, '#1B1325', 235, 12, '#66BB6A', 2);
     this.barHpFill = createUINode('HpFill', 654, 28, hpBg, -327, 0);
@@ -612,7 +678,86 @@ export class BattleView {
 
     const hintBg = createUINode('HintBg', 664, 38, hud, 0, hintY);
     drawRoundedBox(hintBg, 664, 38, '#140E1C', 235, 10, '#7E57C2', 1.5);
-    createLabel(hintBg, '点击阵位或道路外空地放将，战斗中可自由拖拽调阵', 21, '#FFE082', 0, 0, 640, 32, true);
+    createLabel(hintBg, '点击高亮阵位落将 · 左侧拖拽放军令 · 右侧满怒开无双', 21, '#FFE082', 0, 0, 640, 32, true);
+  }
+
+  private bindCommandButtonTouch(btnNode: Node, slotIdx: number): void {
+    const tf = this.root.getComponent(UITransform);
+    const toWorld = (ev: EventTouch) => {
+      if (!tf) return { wx: 375, wy: 680 };
+      const loc = ev.getUILocation();
+      const local = tf.convertToNodeSpaceAR(new Vec3(loc.x, loc.y, 0));
+      return { wx: this.toWorldX(local.x), wy: this.toWorldY(local.y) };
+    };
+
+    btnNode.on(Node.EventType.TOUCH_START, (ev: EventTouch) => {
+      if (this.world.phase !== 'PLAYING') return;
+      const slot = this.world.lordCommands[slotIdx];
+      if (!slot) { showToast(this.root, '升级后解锁第2军令槽'); return; }
+      if (slot.cooldown > 0) { showToast(this.root, `冷却中 (${slot.cooldown.toFixed(1)}s)`); return; }
+      const cfg = getLordCommandConfig(slot.cmdId);
+      if (!cfg) return;
+      if (cfg.targetMode === 'global') {
+        this.world.castLordCommand(slotIdx, 375, 680, true);
+        return;
+      }
+      this.aimingCmdSlot = slotIdx;
+      const p = toWorld(ev);
+      this.aimPos = { x: p.wx, y: p.wy };
+      TimeScaleManager.request('aim', 0.25, 2.0);
+    });
+
+    btnNode.on(Node.EventType.TOUCH_MOVE, (ev: EventTouch) => {
+      if (this.aimingCmdSlot !== slotIdx) return;
+      const p = toWorld(ev);
+      this.aimPos = { x: p.wx, y: p.wy };
+    });
+
+    const finishAim = (ev: EventTouch) => {
+      if (this.aimingCmdSlot !== slotIdx) return;
+      this.aimingCmdSlot = -1;
+      TimeScaleManager.clear('aim');
+      const p = toWorld(ev);
+      this.aimPos = null;
+      if (p.wx >= 60 && p.wx <= 690 && p.wy >= 310 && p.wy <= 1120) {
+        this.world.castLordCommand(slotIdx, p.wx, p.wy, true);
+      } else {
+        showToast(this.root, '已取消军令释放');
+      }
+    };
+    btnNode.on(Node.EventType.TOUCH_END, finishAim);
+    btnNode.on(Node.EventType.TOUCH_CANCEL, finishAim);
+  }
+
+  private showPhase2Banner(text: string, textCol: string, bgCol: string, borderCol: string): void {
+    const banner = createUINode('Phase2Banner', 620, 68, this.modalLayer, 0, 290);
+    drawRoundedBox(banner, 620, 68, bgCol, 232, 14, borderCol, 2.5);
+    createLabel(banner, text, 28, textCol, 0, 0, 590, 40, true);
+    const op = banner.addComponent(UIOpacity);
+    op.opacity = 0;
+    tween(op)
+      .to(0.16, { opacity: 255 })
+      .delay(0.88)
+      .to(0.18, { opacity: 0 })
+      .call(() => { if (banner.isValid) banner.destroy(); })
+      .start();
+  }
+
+  private refreshBondBar(): void {
+    if (!this.bondBarNode || !this.bondBarNode.isValid) return;
+    const active = this.world.activeBonds.filter((b) => b.tier !== null);
+    const sig = active.map((b) => `${b.bond.id}:${b.tier!.need}`).join('|');
+    if (sig === this.lastBondSig) return;
+    this.lastBondSig = sig;
+    this.bondBarNode.removeAllChildren();
+    active.slice(0, 4).forEach((b, idx) => {
+      const chip = createUINode(`Bond_${b.bond.id}`, 128, 30, this.bondBarNode, -196 + idx * 134, 0);
+      drawRoundedBox(chip, 128, 30, '#1B1325', 220, 10, b.bond.color, 1.5);
+      createLabel(chip, `${b.bond.name}·${b.tier!.need}`, 16, b.bond.color, 0, 0, 120, 24, true);
+      chip.on(Node.EventType.TOUCH_END, () => {
+        showToast(this.root, `${b.bond.name}(${b.count}人)：${b.tier!.desc}`);
+      });
+    });
   }
 
   private bindTouchEvents(): void {
@@ -810,24 +955,25 @@ export class BattleView {
       }
     }
 
-    // 1. 8 个黄金阵位（空闲淡青双环+中心点，已占亮金底座环，清晰可见）
+    // 1. 固定带类型预设坑位（基础金 / 高地青 / 门前红铜 / 辅助绿）
     const deploying = this.world.phase === 'DEPLOY_PICK';
     for (const slot of this.world.suggestedSlots) {
       const sx = this.toX(slot.x);
       const sy = this.toY(slot.y);
       const occupied = this.occupiedSlots.has(slot.id);
       const freeHighlight = deploying && !occupied;
-      g.fillColor = hexToColor(freeHighlight ? '#1B5E20' : occupied ? '#3A2A14' : '#1E2A38', freeHighlight ? 145 : occupied ? 120 : 95);
-      g.circle(sx, sy, 31);
+      const meta = SLOT_TYPE_META[slot.slotType || 'normal'];
+      g.fillColor = hexToColor(freeHighlight ? '#1B5E20' : occupied ? '#2A2018' : '#1A2230', freeHighlight ? 150 : occupied ? 120 : 105);
+      g.circle(sx, sy, 32);
       g.fill();
-      g.strokeColor = hexToColor(freeHighlight ? '#69F0AE' : occupied ? '#FFD54F' : '#80DEEA', freeHighlight ? 225 : occupied ? 190 : 155);
-      g.lineWidth = occupied || freeHighlight ? 2.5 : 2;
-      g.circle(sx, sy, 31);
+      g.strokeColor = hexToColor(freeHighlight ? '#69F0AE' : meta.color, freeHighlight ? 240 : occupied ? 215 : 185);
+      g.lineWidth = occupied || freeHighlight ? 3 : 2.2;
+      g.circle(sx, sy, 32);
       g.circle(sx, sy, 21);
       g.stroke();
       if (!occupied) {
-        g.fillColor = hexToColor(freeHighlight ? '#69F0AE' : '#B2EBF2', 175);
-        g.circle(sx, sy, 4);
+        g.fillColor = hexToColor(freeHighlight ? '#69F0AE' : meta.color, 185);
+        g.circle(sx, sy, 4.5);
         g.fill();
       }
     }
@@ -883,8 +1029,9 @@ export class BattleView {
           sx = 1 + b;
           sy = 1 - b;
         }
+        const evoScale = hero.evolved ? 1.12 : 1.0;
         spNode.setPosition(hx, hy + 4 + dy, 0);
-        spNode.setScale(sx, sy, 1);
+        spNode.setScale(sx * evoScale, sy * evoScale, 1);
         const sp = spNode.getComponent(Sprite);
         if (sp) sp.color = isLocked ? COLOR_LOCKED : COLOR_WHITE;
       } else {
@@ -894,6 +1041,14 @@ export class BattleView {
         g.fillColor = hexToColor('#FFE0B2', 255);
         g.circle(hx, hy + 12, 11);
         g.fill();
+      }
+
+      // 进化永久金色光环标识（§7.2）
+      if (hero.evolved) {
+        g.strokeColor = hexToColor('#FFD54F', 235);
+        g.lineWidth = 3;
+        g.circle(hx, hy, 35);
+        g.stroke();
       }
 
       // 武将脚下冷却充能条（冷却中冷青色，就绪为亮金色）
@@ -1265,9 +1420,12 @@ export class BattleView {
 
       if (this.previewPos) {
         const check = this.world.isPositionValidForDeploy(this.previewPos.x, this.previewPos.y);
-        const sx = this.toX(this.previewPos.x);
-        const sy = this.toY(this.previewPos.y);
-        const r = this.world.pendingHeroToPlace.range;
+        const snapX = check.slot ? check.slot.x : this.previewPos.x;
+        const snapY = check.slot ? check.slot.y : this.previewPos.y;
+        const sx = this.toX(snapX);
+        const sy = this.toY(snapY);
+        const stype = check.slot?.slotType || 'normal';
+        const r = this.world.pendingHeroToPlace.range * (stype === 'highland' ? 1.25 : 1);
         const col = check.valid ? '#69F0AE' : '#FF5252';
         g.fillColor = hexToColor(col, 55);
         g.circle(sx, sy, r);
@@ -1276,12 +1434,36 @@ export class BattleView {
         g.lineWidth = 3.5;
         g.circle(sx, sy, r);
         g.stroke();
+        if (check.valid && stype === 'support') {
+          g.strokeColor = hexToColor('#69F0AE', 210);
+          g.lineWidth = 2.5;
+          g.circle(sx, sy, SUPPORT_AURA_RADIUS);
+          g.stroke();
+        }
         g.fillColor = hexToColor(col, 185);
         g.circle(sx, sy, 28);
         g.fill();
         if (this.deployHeroHighlightNode && this.deployHeroHighlightNode.isValid) {
           this.deployHeroHighlightNode.setPosition(sx, sy + 6, 0);
         }
+      }
+    }
+
+    // 主公主动军令拖拽瞄准预览圈（白/金色，严禁使用红色，§4.3）
+    if (this.aimingCmdSlot >= 0 && this.aimPos) {
+      const slot = this.world.lordCommands[this.aimingCmdSlot];
+      const cfg = slot ? getLordCommandConfig(slot.cmdId) : undefined;
+      if (cfg) {
+        const ax = this.toX(this.aimPos.x);
+        const ay = this.toY(this.aimPos.y);
+        const rad = cfg.radius || 140;
+        g.fillColor = hexToColor('#FFF59D', 48);
+        g.circle(ax, ay, rad);
+        g.fill();
+        g.strokeColor = hexToColor('#FFD54F', 245);
+        g.lineWidth = 3.5;
+        g.circle(ax, ay, rad);
+        g.stroke();
       }
     }
 
@@ -1615,6 +1797,42 @@ export class BattleView {
       ui.fill.setScale(Math.max(0.02, ratio), 1, 1);
       ui.lbl.string = h.cooldown > 0.05 ? `${h.cooldown.toFixed(1)}s` : '';
     }
+
+    // 同步双军令槽冷却与名称
+    for (let i = 0; i < this.cmdBtnLabels.length; i++) {
+      const slot = this.world.lordCommands[i];
+      const lbl = this.cmdBtnLabels[i];
+      const node = this.cmdBtnNodes[i];
+      if (!slot) {
+        lbl.string = `军令${i + 1}\nLv6解锁`;
+      } else {
+        const cfg = getLordCommandConfig(slot.cmdId);
+        const shortName = cfg?.shortName || '军令';
+        const ready = slot.cooldown <= 0.05;
+        lbl.string = ready ? `${shortName}Lv${slot.level}\n就绪` : `${shortName}\n${slot.cooldown.toFixed(1)}s`;
+        drawRoundedBox(node, 102, 74, ready ? '#2E2346' : '#181420', 235, 14, ready ? (cfg?.color || '#FFD54F') : '#546E7A', ready ? 2.5 : 1.5);
+      }
+    }
+
+    // 同步无双大圆按钮怒气
+    if (this.lblMusou && this.musouBtnNode) {
+      const pct = Math.min(100, Math.floor((this.world.rage / this.world.maxRage) * 100));
+      const full = pct >= 100;
+      const near = pct >= 80;
+      this.lblMusou.string = full ? '无双\n释放!' : `无双\n${pct}%`;
+      drawRoundedBox(
+        this.musouBtnNode,
+        106,
+        106,
+        full ? '#5C2608' : near ? '#3B2214' : '#221814',
+        240,
+        53,
+        full ? '#FFD54F' : near ? '#FFAB40' : '#78909C',
+        full ? 4 : 2.5
+      );
+    }
+
+    this.refreshBondBar();
   }
 
   private syncUIState(): void {
@@ -1705,7 +1923,9 @@ export class BattleView {
     popInModal(content);
     let title = `主公升级 Lv.${this.world.battleLevel} · 选择军策`;
     const isOpening = this.world.currentChoiceIsOpening;
-    if (isOpening) {
+    if (this.world.currentChoiceIsOpeningCommand) {
+      title = '开局军令 · 选择 1 个主动军令';
+    } else if (isOpening) {
       this.openingChoiceShown++;
       title = '开局点将 · 选择 1 位首发武将';
     } else if (this.world.currentChoiceIsChest) {
@@ -1738,6 +1958,11 @@ export class BattleView {
       tween(op).delay(i * 0.06).to(0.12, { opacity: 255 }).start();
 
       createLabel(cardNode, card.tags.join(' · '), 19, '#80D8FF', 0, 170, 214, 28, true);
+      if (card.bondHint) {
+        const bTip = createUINode('BondHint', 206, 26, cardNode, 0, 140);
+        drawRoundedBox(bTip, 206, 26, '#1B3A24', 235, 8, '#69F0AE', 1.5);
+        createLabel(bTip, card.bondHint, 15, '#FFE57F', 0, 0, 198, 22, true);
+      }
       const art = card.heroId ? HERO_ART_KEY_MAP[card.heroId] : card.type === 'LORD_SKILL' ? HERO_ART_KEY_MAP.LORD : undefined;
       const hasArt = !!art && !!ArtAssetManager.createSpriteNode(cardNode, art, 98, 98, 0, 100);
       createLabel(cardNode, card.title, 26, borderHex, 0, hasArt ? 28 : 102, 214, 36, true);
@@ -2074,30 +2299,34 @@ export class BattleView {
 
     const mask = createModalOverlay(this.modalLayer);
     this.settleModal = mask;
-    const box = createUINode('SettleBox', 610, 610, mask, 0, 0);
-    drawRoundedBox(box, 610, 610, '#221833', 255, 18, win ? '#FFD54F' : '#90A4AE', 3);
-    ArtAssetManager.skinPanel(box, 610, 610);
+    const boxH = win ? 680 : 610;
+    const box = createUINode('SettleBox', 610, boxH, mask, 0, 0);
+    drawRoundedBox(box, 610, boxH, '#221833', 255, 18, win ? '#FFD54F' : '#90A4AE', 3);
+    ArtAssetManager.skinPanel(box, 610, boxH);
     popInModal(box, mask);
 
+    const yOff = win ? 24 : 0;
     if (win) {
-      attachSpinLoop(box, 300, 22, '#FFD54F', 0, 220, true);
-      attachGlowPulse(box, 200, '#FFE082', 0, 220, true, { minOpacity: 80, maxOpacity: 210, scaleAmp: 0.12 });
+      attachSpinLoop(box, 310, 20, '#FFD54F', 0, 272, true);
+      attachGlowPulse(box, 200, '#FFE082', 0, 272, true, { minOpacity: 80, maxOpacity: 210, scaleAmp: 0.12 });
     }
 
     const modeTag = this.world.challenge ? '【精英挑战】' : '';
-    const titleLbl = createLabel(box, win ? `${modeTag}大获全胜！` : `${modeTag}惜败撤退`, 36, win ? '#FFD54F' : '#FF8A80', 0, 262, 540, 50, true);
+    const titleY = win ? 186 : 254;
+    const titleLbl = createLabel(box, win ? `${modeTag}大获全胜！` : `${modeTag}惜败撤退`, 34, win ? '#FFD54F' : '#FF8A80', 0, titleY, 540, 46, true);
     titleLbl.node.setScale(0, 0, 1);
     tween(titleLbl.node).delay(0.12).to(0.4, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
 
     // 星级评价：★通关 / ★城墙剩余≥50% / ★最高连斩≥50
+    const starBaseY = win ? 132 : 196;
     for (let i = 0; i < 3; i++) {
       const sx = (i - 1) * 84;
-      const sy = i === 1 ? 210 : 200;
-      const star = createLabel(box, '★', 62, '#4A4358', sx, sy, 80, 74, true);
+      const sy = i === 1 ? starBaseY + 8 : starBaseY;
+      const star = createLabel(box, '★', 58, '#4A4358', sx, sy, 80, 70, true);
       if (win && i < stars) {
         star.node.setScale(0.2, 0.2, 1);
         tween(star.node)
-          .delay(0.45 + i * 0.3)
+          .delay(0.45 + i * 0.28)
           .call(() => {
             star.color = hexToColor('#FFD54F');
             AudioManager.playSfx('sfx_levelup');
@@ -2116,34 +2345,35 @@ export class BattleView {
     createLabel(
       box,
       `${win ? '✓' : '✗'} 通关   ${hpPct >= 50 ? '✓' : '✗'} 城墙≥50%   ${this.world.combo.maxCombo >= 50 ? '✓' : '✗'} 连斩≥50`,
-      15, '#B0BEC5', 0, 154, 520, 24, true
+      15, '#B0BEC5', 0, starBaseY - 46, 520, 24, true
     );
 
-    // 4 行核心数据逐行出现（每行 0.15s）+ 1.2s 数字 count-up
+    // 4 行核心数据逐行出现（每行 0.14s）+ 1.1s 数字 count-up
     const rows = [
       { label: '击杀敌军', target: this.world.kills, suffix: ' 人', fmt: false, color: '#FFFFFF' },
       { label: '最高连斩', target: this.world.combo.maxCombo, suffix: ' 连斩', fmt: false, color: '#FFD54F' },
       { label: '总计伤害', target: this.world.getTotalDamage(), suffix: '', fmt: true, color: '#FF8A65' },
       { label: '剩余城墙', target: hpPct, suffix: `% (${this.world.wallHp})`, fmt: false, color: '#69F0AE' },
     ];
+    const rowStartY = starBaseY - 84;
     rows.forEach((r, idx) => {
-      const y = 112 - idx * 36;
-      const rowNode = createUINode(`StatRow_${idx}`, 480, 32, box, -30, y);
+      const y = rowStartY - idx * 34;
+      const rowNode = createUINode(`StatRow_${idx}`, 480, 30, box, -30, y);
       const op = rowNode.addComponent(UIOpacity);
       op.opacity = 0;
-      const lLbl = createLabel(rowNode, r.label, 19, '#CFD8DC', -130, 0, 180, 28, true);
+      const lLbl = createLabel(rowNode, r.label, 19, '#CFD8DC', -130, 0, 180, 26, true);
       lLbl.horizontalAlign = Label.HorizontalAlign.LEFT;
-      const vLbl = createLabel(rowNode, `0${r.suffix}`, 20, r.color, 100, 0, 260, 28, true);
+      const vLbl = createLabel(rowNode, `0${r.suffix}`, 20, r.color, 100, 0, 260, 26, true);
       vLbl.horizontalAlign = Label.HorizontalAlign.RIGHT;
 
-      const delay = 0.25 + idx * 0.15;
+      const delay = 0.25 + idx * 0.14;
       tween(rowNode).delay(delay).to(0.18, { position: new Vec3(0, y, 0) }, { easing: 'quadOut' }).start();
       tween(op).delay(delay).to(0.18, { opacity: 255 }).start();
 
       const state = { v: 0 };
       tween(state)
         .delay(delay)
-        .to(1.2, { v: r.target }, {
+        .to(1.1, { v: r.target }, {
           easing: 'quadOut',
           onUpdate: () => {
             if (!vLbl.isValid) return;
@@ -2157,15 +2387,55 @@ export class BattleView {
         .start();
     });
 
+    // 奖励托盘（上浮淡入 + 数字滚动计数）
     const shardName = getHeroConfig(reward.shardHeroId || '')?.name || reward.shardHeroId;
-    createLabel(
-      box,
-      `获得奖励：铜钱 +${reward.gold}  元宝 +${reward.diamond}\n锻造石 +${reward.forgeStone}  将魂(${shardName}) +${reward.shardCount}`,
-      19, '#80CBC4', 0, -90, 540, 68
-    );
+    const trayY = -148 - yOff * 0.5;
+    const rewardTray = createUINode('RewardTray', 540, 86, box, 0, trayY - 18);
+    drawRoundedBox(rewardTray, 540, 86, '#150F24', 220, 14, '#5E4B2E', 1.5);
+    const trayOp = rewardTray.addComponent(UIOpacity);
+    trayOp.opacity = 0;
 
+    const goldLbl = createLabel(rewardTray, '铜钱 +0', 21, '#FFD54F', -145, 18, 220, 30, true);
+    const diaLbl = createLabel(rewardTray, '元宝 +0', 21, '#80D8FF', 135, 18, 220, 30, true);
+    const extraLbl = createLabel(
+      rewardTray,
+      `锻造石 +${reward.forgeStone}    将魂(${shardName}) +${reward.shardCount}`,
+      18, '#80CBC4', 0, -18, 500, 28, true
+    );
+    const nrGold = attachNumberRoll(goldLbl.node, 0, { prefix: '铜钱 +', duration: 0.75, tintOnIncrease: true });
+    const nrDia = attachNumberRoll(diaLbl.node, 0, { prefix: '元宝 +', duration: 0.75, tintOnIncrease: true });
+
+    const revealTray = () => {
+      if (!rewardTray.isValid) return;
+      tween(rewardTray).to(0.32, { position: new Vec3(0, trayY, 0) }, { easing: 'backOut' }).start();
+      tween(trayOp).to(0.28, { opacity: 255 }).start();
+      nrGold.rollTo(reward.gold);
+      nrDia.rollTo(reward.diamond);
+    };
+
+    if (win) {
+      // 伪 3D 翻转掉落胜利徽章 + 可反复点击散射彩纸屑
+      const badge = createHexBadge(box, 108, '#4A148C', '#FFD54F', '大捷', `${stars}★`, '点击撒花', 0, 272);
+      playBadgeDrop(badge, mask, {
+        initialConfetti: 65,
+        tapConfetti: 36,
+        confettiPos: new Vec3(0, 272, 0),
+        onReveal: () => {
+          playGlowRing(box, new Vec3(0, 272, 0), 140, '#FFD54F', true);
+          revealTray();
+        },
+        onTap: () => {
+          AudioManager.playSfx('sfx_coin', 0.65, 1.15);
+          playGlowRing(box, new Vec3(0, 272, 0), 110, '#FFE082');
+        },
+      });
+    } else {
+      tween(box).delay(0.4).call(revealTray).start();
+    }
+
+    const btnY = -boxH / 2 + 54;
     let doubled = false;
-    createButton(box, '双倍领取 (广告)', 220, 56, '#F57F17', async () => {
+    const doubleBtn = createButton(box, '双倍领取 (广告)', 230, 58, '#F57F17', async () => {
       if (doubled) {
         showToast(this.root, '已领取过双倍奖励');
         return;
@@ -2176,10 +2446,33 @@ export class BattleView {
         report.doubled = true;
         this.dataMgr.grantExtraReward(reward);
         AudioManager.playSfx('sfx_coin');
+        doubleBtn.label.string = '已双倍领取';
+        playConfettiBurst(mask, new Vec3(0, trayY, 0), 45);
+        playFlyIcons(
+          mask,
+          new Vec3(-130, btnY, 0),
+          new Vec3(-145, trayY + 18, 0),
+          10,
+          'icon_gold',
+          '#FFD54F',
+          () => {
+            if (extraLbl.isValid) {
+              extraLbl.string = `锻造石 +${reward.forgeStone * 2}    将魂(${shardName}) +${reward.shardCount * 2}`;
+              playTickPop(extraLbl.node, 1.12);
+            }
+          },
+          (idx, total) => {
+            const stepGold = reward.gold + Math.round((reward.gold * (idx + 1)) / total);
+            const stepDia = reward.diamond + Math.round((reward.diamond * (idx + 1)) / total);
+            nrGold.rollTo(stepGold);
+            nrDia.rollTo(stepDia);
+          },
+          rewardTray
+        );
         showToast(this.root, '已额外发放双倍资源奖励!');
       }
-    }, -130, -210, 20);
+    }, -130, btnY, 20);
 
-    createButton(box, '返回大厅', 200, 56, '#5E35B1', () => this.exitBattle(), 130, -210, 22);
+    createButton(box, '返回大厅', 200, 58, '#5E35B1', () => this.exitBattle(), 130, btnY, 22);
   }
 }

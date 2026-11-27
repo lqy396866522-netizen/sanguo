@@ -10,13 +10,16 @@ import {
   attachSpinLoop,
   bindModalBackdropClose,
   createButton,
+  createHexBadge,
   createLabel,
   createModalOverlay,
   createUINode,
   drawCardPanel,
   drawRoundedBox,
   getScreenLayout,
+  playBadgeDrop,
   playBurstParticles,
+  playConfettiBurst,
   playGlowRing,
   playPopBounce,
   playShakeDeny,
@@ -238,7 +241,7 @@ export class HeroBookView {
           tintOnIncrease: true,
         });
         nrLv.rollTo(save.level);
-        this.playLevelUpFx(stageBox, sp, -206, centerY + stageY);
+        this.playLevelUpFx(stageBox, sp, -206, centerY + stageY, save.level);
       }
     } else if (hero.unlockType === 'SHARDS') {
       const canRecruit = (save?.shards || 0) >= hero.unlockParam;
@@ -390,8 +393,8 @@ export class HeroBookView {
     }
   }
 
-  // 升级成功反馈：展示台闪白 + 立绘放大 + 金色光环扩散 + 星星粒子 + 飘字
-  private playLevelUpFx(card: Node, avatar: Node | null, x: number, y: number): void {
+  // 升级成功反馈：展示台闪白 + 立绘放大 + 金色光环 + 交互彩纸屑 + 伪 3D 等级徽章
+  private playLevelUpFx(card: Node, avatar: Node | null, x: number, y: number, newLevel: number): void {
     const tf = card.getComponent(UITransform);
     const w = tf ? tf.width : 274;
     const h = tf ? tf.height : 320;
@@ -405,7 +408,22 @@ export class HeroBookView {
     playGlowRing(this.root, ap, 120, '#FFD54F');
     playGlowRing(this.root, ap, 155, '#FFF3C4', true);
     playBurstParticles(this.root, ap, 12, '#FFD54F');
-    FloatText.show(this.root, card.worldPosition, '等级提升!', FloatStyle.levelUp);
+    playConfettiBurst(this.root, ap, 45);
+    FloatText.show(this.root, card.worldPosition, `Lv.${newLevel} 等级提升!`, FloatStyle.levelUp);
+
+    // 立绘台右上角短暂掉落一枚伪 3D 翻转等级徽章，1.5s 后淡出
+    const badge = createHexBadge(card, 74, '#2E7D32', '#FFD54F', '晋升', `Lv.${newLevel}`, undefined, w / 2 - 44, h / 2 - 44);
+    const bop = badge.addComponent(UIOpacity);
+    playBadgeDrop(badge, this.root, {
+      initialConfetti: 18,
+      tapConfetti: 24,
+      confettiPos: new Vec3(x + w / 2 - 44, y + h / 2 - 44, 0),
+    });
+    tween(bop)
+      .delay(1.5)
+      .to(0.3, { opacity: 0 })
+      .call(() => { if (badge.isValid) badge.destroy(); })
+      .start();
   }
 
   private showHeroDetail(hero: HeroConfig, unlockAnimIdx = -1): void {

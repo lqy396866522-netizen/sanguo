@@ -1,7 +1,7 @@
 import type { SlotPos } from './types.ts';
 
 export type EnemyRoleType = 'normal' | 'rabble' | 'shield' | 'cavalry' | 'medic' | 'elite' | 'boss';
-export type SlotType = 'normal' | 'corner' | 'highland' | 'front' | 'support';
+export type SlotType = 'normal' | 'highland' | 'gate' | 'support';
 export type WaveNodeIcon = 'elite' | 'shield' | 'cavalry' | 'medic' | 'boss';
 export type WaveKind = 'opening' | 'build' | 'form' | 'pressure' | 'release' | 'boss';
 export type WaveBannerTone = 'positive' | 'warning';
@@ -33,33 +33,33 @@ export interface PresetSlotDef extends SlotPos {
   slotType: SlotType;
 }
 
-// 预埋第2阶段点位配置结构（本阶段全部为 normal，后续可直接切 corner/highland/front/support）
+// 第 1 关 U 型图标准 9 个固定带类型坑位（基础4 / 高地2 / 辅助2 / 门前2 -> 实际 3基础+2高地+2辅助+2门前=9）
 export const SLOTS: PresetSlotDef[] = [
-  { id: 1, x: 220, y: 940, tag: 'front', slotType: 'normal' },
-  { id: 2, x: 520, y: 940, tag: 'front', slotType: 'normal' },
-  { id: 3, x: 180, y: 780, tag: 'mid', slotType: 'normal' },
-  { id: 4, x: 375, y: 760, tag: 'mid', slotType: 'normal' },
-  { id: 5, x: 560, y: 760, tag: 'mid', slotType: 'normal' },
-  { id: 6, x: 200, y: 580, tag: 'mid', slotType: 'normal' },
-  { id: 7, x: 540, y: 580, tag: 'mid', slotType: 'normal' },
-  { id: 8, x: 240, y: 420, tag: 'back', slotType: 'normal' },
-  { id: 9, x: 510, y: 420, tag: 'back', slotType: 'normal' },
+  { id: 1, x: 240, y: 960, tag: 'front', slotType: 'normal' },
+  { id: 2, x: 490, y: 960, tag: 'front', slotType: 'highland' },
+  { id: 3, x: 210, y: 740, tag: 'mid',   slotType: 'normal' },
+  { id: 4, x: 375, y: 740, tag: 'mid',   slotType: 'support' },
+  { id: 5, x: 540, y: 740, tag: 'mid',   slotType: 'normal' },
+  { id: 6, x: 200, y: 560, tag: 'mid',   slotType: 'highland' },
+  { id: 7, x: 460, y: 560, tag: 'mid',   slotType: 'support' },
+  { id: 8, x: 250, y: 405, tag: 'back',  slotType: 'gate' },
+  { id: 9, x: 500, y: 405, tag: 'back',  slotType: 'gate' },
 ];
 
 export const RUN_CONFIG = {
   targetDuration: 270, // 目标单局参考时长（秒），270s 后触发 Boss 狂暴计时
   totalWaves: 20,
 
-  // 敌人单体血量指数底数：h(w) = hpMulBase^(w - 1)（按靶场实测 P(t) 校准）
-  hpMulBase: 1.068,
+  // 敌人单体血量指数底数：h(w) = hpMulBase^(w - 1)（按第2阶段 2A+2B 靶场实测 P(t)=2683 DPS 重校）
+  hpMulBase: 1.092,
 
-  // 特殊敌人相对同波普通小兵血量的倍数（按靶场 W20 实测 DPS 与 22~29s 击杀目标校准）
+  // 特殊敌人相对同波普通小兵血量的倍数
   specialHpMult: {
     shield: 3,
     cavalry: 2,
     medic: 2.5,
-    elite: 10,
-    boss: 14.5,
+    elite: 11,
+    boss: 12.5,
   } as Record<Exclude<EnemyRoleType, 'normal' | 'rabble'>, number>,
 
   waves: [

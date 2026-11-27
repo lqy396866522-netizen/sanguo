@@ -112,6 +112,10 @@ test('12. 开局单选点将标记、升级全都要与单位顿帧', () => {
   assert.equal(w.phase, 'DEPLOY_PICK');
   assert.equal(w.autoPlacePendingHero(), true);
   assert.equal(w.deployedHeroes.size, 1, '开局仅应上阵 1 名首发武将');
+  assert.equal(w.phase, 'ROGUE_CHOICE', '首发落位后应弹出开局军令 3 选 1');
+  assert.equal(w.currentChoiceIsOpeningCommand, true);
+  w.selectRogueCard(0);
+  assert.equal(w.lordCommands.length, 1, '开局军令选完后应获得 1 个主动军令');
   assert.equal(w.phase, 'PLAYING');
 
   let testedTakeAll = false;
